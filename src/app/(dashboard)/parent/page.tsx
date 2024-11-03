@@ -4,10 +4,23 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 
+interface ProfileData {
+  role: string;
+  username: string | null;
+  full_name: string | null;
+}
+
+interface UserData {
+  role: string;
+  username: string | null;
+  full_name: string | null;
+  email: string | null;
+}
+
 export default function ParentDashboardPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
-  const [userData, setUserData] = useState<{ role: string; username?: string; full_name?: string; email?: string } | null>(null);
+  const [userData, setUserData] = useState<UserData | null>(null);
 
   useEffect(() => {
     const checkSession = async () => {
@@ -69,7 +82,7 @@ export default function ParentDashboardPage() {
           role: profileData.role,
           username: profileData.username,
           full_name: profileData.full_name,
-          email: user.email 
+          email: user.email ?? null
         });
         setIsLoading(false);
       } catch (error) {
