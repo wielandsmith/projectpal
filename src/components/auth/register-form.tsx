@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { supabase } from '@/lib/supabase/client';
+import { useToast } from "@/components/ui/use-toast";
 
 // Add type for role
 type UserRole = 'student' | 'teacher' | 'parent';
@@ -18,9 +19,11 @@ export default function RegisterForm() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [username, setUsername] = useState('');
-  const [role, setRole] = useState<UserRole>('student'); // Properly typed role
+  const [fullName, setFullName] = useState('');
+  const [role, setRole] = useState<UserRole>('student');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,37 +37,84 @@ export default function RegisterForm() {
     }
 
     try {
-      // Sign up the user
-      const { data: { user }, error: signUpError } = await supabase.auth.signUp({
+      const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
         options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: {
-            role, // This will now be properly typed
+            role: role,
+            username,
+            full_name: fullName
           }
         }
       });
 
-      if (signUpError) throw signUpError;
-
-      if (user) {
-        // Create the profile with properly typed role
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .insert({
-            id: user.id,
-            username,
-            role: role as UserRole,
-          });
-
-        if (profileError) throw profileError;
-
-        // Redirect to login page with success message
-        router.push('/login?registered=true');
+      if (signUpError) {
+        if (signUpError.status === 429) {
+          throw new Error('Too many registration attempts. Please wait a few minutes and try again.');
+        }
+        throw signUpError;
       }
+
+      if (!data.user) {
+        throw new Error('No user returned from sign up');
+      }
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: data.user.id,
+          username,
+          role,
+          full_name: fullName,
+          created_at: new Date().toISOString()
+        });
+
+      console.log('Profile creation data:', {
+        id: data.user.id,
+        username,
+        role,
+        full_name: fullName
+      });
+
+      if (profileError) {
+        console.error('Profile creation error details:', JSON.stringify(profileError, null, 2));
+        throw profileError;
+      }
+
+      const { data: profile, error: verifyError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', data.user.id)
+        .single();
+
+      console.log('Verification of profile:', profile);
+      if (verifyError) console.error('Verify error:', verifyError);
+
+      toast({
+        title: "Registration successful!",
+        description: "Please check your email to confirm your account.",
+      });
+
+      router.push('/login');
     } catch (error) {
-      console.error('Registration error:', error);
-      setError(error instanceof Error ? error.message : 'An error occurred during registration');
+      console.error('Registration error details:', JSON.stringify(error, null, 2));
+      if (error instanceof Error) {
+        setError(error.message);
+        toast({
+          title: "Registration failed",
+          description: error.message,
+          variant: "destructive",
+        });
+      } else {
+        setError('An unexpected error occurred during registration');
+        toast({
+          title: "Registration failed",
+          description: "An unexpected error occurred",
+          variant: "destructive",
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -97,6 +147,17 @@ export default function RegisterForm() {
               onChange={(e) => setUsername(e.target.value)}
               required
               placeholder="Choose a username"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="fullName">Full Name</Label>
+            <Input
+              id="fullName"
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              required
+              placeholder="Enter your full name"
             />
           </div>
           <div className="space-y-2">

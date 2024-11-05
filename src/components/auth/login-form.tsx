@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { supabase } from '@/lib/supabase/client';
+import { useToast } from "@/components/ui/use-toast";
 
 export default function LoginForm() {
   const router = useRouter();
@@ -14,6 +16,7 @@ export default function LoginForm() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,28 +24,86 @@ export default function LoginForm() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
+      // Sign in with Supabase
+      const { data: { user }, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
 
-      const data = await response.json();
+      if (signInError) throw signInError;
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Login failed');
+      if (!user) throw new Error('No user returned from login');
+
+      console.log('User data:', user);
+
+      // Fetch the user's profile
+      let { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select()
+        .eq('id', user.id)
+        .maybeSingle();
+
+      console.log('Profile data:', profile);
+      console.log('Profile error:', profileError);
+
+      if (profileError) {
+        console.error('Profile fetch error:', profileError);
+        throw new Error('Could not fetch user profile');
       }
 
-      if (data.role) {
-        router.replace(`/${data.role}`);
-      } else {
-        throw new Error('User role not found');
+      if (!profile) {
+        // If no profile exists, create one from user metadata
+        const { error: createProfileError } = await supabase
+          .from('profiles')
+          .upsert({
+            id: user.id,
+            role: user.user_metadata.role || 'student',
+            username: user.user_metadata.username,
+            full_name: user.user_metadata.full_name,
+            created_at: new Date().toISOString()
+          });
+
+        if (createProfileError) throw new Error('Could not create user profile');
+        
+        // Fetch the newly created profile
+        const { data: newProfile, error: newProfileError } = await supabase
+          .from('profiles')
+          .select()
+          .eq('id', user.id)
+          .single();
+
+        if (newProfileError || !newProfile) throw new Error('Could not fetch new profile');
+        
+        profile = newProfile;
+      }
+
+      // Show success toast
+      toast({
+        title: "Login successful!",
+        description: `Welcome back! Logged in as ${profile.role}`,
+      });
+
+      // Redirect based on role
+      switch (profile.role) {
+        case 'teacher':
+          router.push('/dashboard/teacher');
+          break;
+        case 'parent':
+          router.push('/dashboard/parent');
+          break;
+        case 'student':
+        default:
+          router.push('/dashboard/student');
+          break;
       }
     } catch (error) {
       console.error('Login error:', error);
       setError(error instanceof Error ? error.message : 'An error occurred');
+      toast({
+        title: "Login failed",
+        description: error instanceof Error ? error.message : 'An error occurred',
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
