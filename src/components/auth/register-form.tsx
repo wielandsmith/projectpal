@@ -9,13 +9,16 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { supabase } from '@/lib/supabase/client';
 
+// Add type for role
+type UserRole = 'student' | 'teacher' | 'parent';
+
 export default function RegisterForm() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [username, setUsername] = useState('');
-  const [role, setRole] = useState('student'); // Default to student
+  const [role, setRole] = useState<UserRole>('student'); // Properly typed role
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -35,22 +38,24 @@ export default function RegisterForm() {
       const { data: { user }, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          data: {
+            role, // This will now be properly typed
+          }
+        }
       });
 
       if (signUpError) throw signUpError;
 
       if (user) {
-        // Create the profile
+        // Create the profile with properly typed role
         const { error: profileError } = await supabase
           .from('profiles')
-          .insert([
-            {
-              id: user.id,
-              username,
-              role,
-              created_at: new Date().toISOString(),
-            }
-          ]);
+          .insert({
+            id: user.id,
+            username,
+            role: role as UserRole,
+          });
 
         if (profileError) throw profileError;
 
@@ -99,7 +104,7 @@ export default function RegisterForm() {
             <select
               id="role"
               value={role}
-              onChange={(e) => setRole(e.target.value)}
+              onChange={(e) => setRole(e.target.value as UserRole)}
               className="w-full p-2 border rounded"
               required
             >
