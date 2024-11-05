@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,26 +16,37 @@ export default function ResetPassword() {
   const [loading, setLoading] = useState(false);
   const [validatingSession, setValidatingSession] = useState(true);
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { toast } = useToast();
 
-  // Verify the user has a valid reset token
   useEffect(() => {
-    const verifySession = async () => {
+    const handlePasswordReset = async () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
+        // Get the hash parameters from the URL
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
         
-        if (error) throw error;
-        
-        if (!session) {
-          // Check if we have a code in the URL (from email link)
-          const code = searchParams.get('code');
-          if (!code) {
-            throw new Error('No reset code found');
-          }
+        // Check if we have an error in the hash
+        const errorDescription = hashParams.get('error_description');
+        if (errorDescription) {
+          throw new Error(errorDescription);
+        }
+
+        // Get the tokens from the hash
+        const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
+        const type = hashParams.get('type');
+
+        if (type === 'recovery' && accessToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken || '',
+          });
+
+          if (error) throw error;
+        } else {
+          throw new Error('Invalid password reset link');
         }
       } catch (error) {
-        console.error('Session verification error:', error);
+        console.error('Password reset verification error:', error);
         toast({
           title: "Invalid or expired reset link",
           description: "Please request a new password reset link",
@@ -47,8 +58,8 @@ export default function ResetPassword() {
       }
     };
 
-    verifySession();
-  }, [router, searchParams, toast]);
+    handlePasswordReset();
+  }, [router, toast]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
