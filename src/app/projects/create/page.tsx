@@ -2,14 +2,16 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Plus, Minus, Upload, Video, FileText, Book } from 'lucide-react';
+import { Plus, Minus, Upload, ChevronLeft } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { useToast } from "@/components/ui/use-toast";
 
 type Lesson = {
   title: string;
@@ -31,6 +33,7 @@ type ProjectData = {
 
 export default function CreateProjectPage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [projectData, setProjectData] = useState<ProjectData>({
     title: '',
     summary: '',
@@ -40,6 +43,7 @@ export default function CreateProjectPage() {
     resources: [],
     lessons: [{ title: '', description: '', videoUrl: '', imageFile: null, resources: [] }]
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -82,14 +86,40 @@ export default function CreateProjectPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Project data submitted:', projectData);
-    // Here you would typically send the data to your backend
-    // After successful submission, redirect to the project page or dashboard
-    router.push('/dashboard');
+    setIsSubmitting(true);
+    
+    try {
+      console.log('Project data submitted:', projectData);
+      
+      toast({
+        title: "Project created successfully!",
+        description: "Your new project has been created.",
+      });
+      
+      router.push('/dashboard');
+    } catch (error) {
+      console.error('Error creating project:', error);
+      toast({
+        title: "Error creating project",
+        description: error instanceof Error ? error.message : "Something went wrong",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-100 via-blue-100 to-purple-100 p-8">
+      {/* Navigation - Simplified */}
+      <div className="max-w-4xl mx-auto mb-6">
+        <Link href="/dashboard/parent">
+          <Button variant="ghost" className="gap-2">
+            <ChevronLeft className="h-4 w-4" /> Back to Dashboard
+          </Button>
+        </Link>
+      </div>
+
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -261,8 +291,20 @@ export default function CreateProjectPage() {
                 </AccordionItem>
               </Accordion>
 
-              <Button type="submit" className="w-full">
-                <Upload className="mr-2 h-4 w-4" /> Create Project
+              <Button 
+                type="submit" 
+                className="w-full"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <>
+                    <span className="animate-spin mr-2">⏳</span> Creating Project...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="mr-2 h-4 w-4" /> Create Project
+                  </>
+                )}
               </Button>
             </form>
           </CardContent>
