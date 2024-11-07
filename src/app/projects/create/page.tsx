@@ -30,8 +30,42 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { lessonTemplates } from '@/lib/templates/lesson-templates';
+import { 
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Markdown } from "@/components/ui/markdown";
+import { saveAs } from 'file-saver';
+import { 
+  exportLessonToJSON, 
+  validateImportedLesson, 
+  createCustomTemplate,
+  LessonTemplate
+} from '@/lib/templates/lesson-templates';
+import dynamic from 'next/dynamic';
+
+const DragDropContext = dynamic(
+  () => import('react-beautiful-dnd').then(mod => mod.DragDropContext),
+  { ssr: false }
+);
+const Droppable = dynamic(
+  () => import('react-beautiful-dnd').then(mod => mod.Droppable),
+  { ssr: false }
+);
+const Draggable = dynamic(
+  () => import('react-beautiful-dnd').then(mod => mod.Draggable),
+  { ssr: false }
+);
 
 type Lesson = {
+  id: string;
   title: string;
   description: string;
   videoUrl: string;
@@ -47,6 +81,12 @@ type ProjectData = {
   materials: File[];
   resources: File[];
   lessons: Lesson[];
+  subject: 'math' | 'science' | 'history' | 'geography' | 'reading' | 'art';
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  estimatedDuration: number;
+  durationUnit: 'minutes' | 'hours' | 'days' | 'weeks';
+  learningObjectives: string;
+  prerequisites: string;
 }
 
 // Validation schema
@@ -70,6 +110,18 @@ const ACCEPTED_DOCUMENT_TYPES = {
   'application/pdf': ['.pdf']
 };
 
+// Add lesson validation schema
+const lessonSchema = z.object({
+  title: z.string()
+    .min(3, "Title must be at least 3 characters")
+    .max(100, "Title must be less than 100 characters"),
+  description: z.string()
+    .min(10, "Description must be at least 10 characters")
+    .max(5000, "Description must be less than 5000 characters"),
+  videoUrl: z.string().url().optional().or(z.literal("")),
+  resources: z.array(z.any()).max(5, "Maximum 5 resources allowed per lesson"),
+});
+
 export default function CreateProjectPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -80,7 +132,13 @@ export default function CreateProjectPage() {
     introVideoUrl: '',
     materials: [],
     resources: [],
-    lessons: [{ title: '', description: '', videoUrl: '', imageFile: null, resources: [] }]
+    lessons: [{ id: crypto.randomUUID(), title: '', description: '', videoUrl: '', imageFile: null, resources: [] }],
+    subject: 'math',
+    difficulty: 'beginner',
+    estimatedDuration: 0,
+    durationUnit: 'hours',
+    learningObjectives: '',
+    prerequisites: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -101,6 +159,8 @@ export default function CreateProjectPage() {
   }));
   const [uploadErrors, setUploadErrors] = useState<UploadError[]>([]);
   const [bandwidthLimit, setBandwidthLimit] = useState<number>(Infinity);
+  const [previewLesson, setPreviewLesson] = useState<Lesson | null>(null);
+  const [lessonErrors, setLessonErrors] = useState<Record<string, string[]>>({});
   
   // Debounce project data changes for auto-save
   const debouncedProjectData = useDebounce(projectData, 1000);
@@ -108,11 +168,16 @@ export default function CreateProjectPage() {
   // Auto-save effect
   useEffect(() => {
     const autoSave = async () => {
-      if (!debouncedProjectData.title) return; // Don't save empty projects
+      if (!debouncedProjectData.title) return;
       
       try {
         setAutoSaveStatus('saving');
-        // Save to localStorage for now (replace with API call later)
+        // Save current version as previous before updating
+        const currentDraft = localStorage.getItem('draft-project');
+        if (currentDraft) {
+          localStorage.setItem('previous-draft-project', currentDraft);
+        }
+        // Save new version
         localStorage.setItem('draft-project', JSON.stringify(debouncedProjectData));
         setAutoSaveStatus('saved');
       } catch (error) {
@@ -136,9 +201,24 @@ export default function CreateProjectPage() {
     }
   }, []);
 
+  const [isFormDirty, setIsFormDirty] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isFormDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isFormDirty]);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setProjectData(prev => ({ ...prev, [name]: value }));
+    setIsFormDirty(true);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, field: keyof ProjectData) => {
@@ -164,7 +244,14 @@ export default function CreateProjectPage() {
   const addLesson = () => {
     setProjectData(prev => ({
       ...prev,
-      lessons: [...prev.lessons, { title: '', description: '', videoUrl: '', imageFile: null, resources: [] }]
+      lessons: [...prev.lessons, {
+        id: crypto.randomUUID(),
+        title: '',
+        description: '',
+        videoUrl: '',
+        imageFile: null,
+        resources: []
+      }]
     }));
   };
 
@@ -239,6 +326,7 @@ export default function CreateProjectPage() {
       });
       
       localStorage.removeItem('draft-project');
+      setIsFormDirty(false);
       router.push('/dashboard/parent');
     } catch (error) {
       console.error('Error creating project:', error);
@@ -338,6 +426,132 @@ export default function CreateProjectPage() {
     return () => clearInterval(interval);
   }, [fileUploader]);
 
+  // Add lesson reordering function
+  const handleLessonReorder = (result: any) => {
+    if (!result.destination) return;
+
+    const items = Array.from(projectData.lessons);
+    const [reorderedItem] = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, reorderedItem);
+
+    setProjectData(prev => ({ ...prev, lessons: items }));
+    setIsFormDirty(true);
+  };
+
+  // Add lesson template function
+  const applyTemplate = (templateId: string) => {
+    const template = lessonTemplates.find(t => t.id === templateId);
+    if (!template) return;
+
+    setProjectData(prev => ({
+      ...prev,
+      lessons: [...prev.lessons, {
+        id: crypto.randomUUID(),
+        ...template.template
+      }]
+    }));
+    setIsFormDirty(true);
+  };
+
+  // Add lesson validation function
+  const validateLesson = (lesson: Lesson, index: number) => {
+    try {
+      lessonSchema.parse(lesson);
+      const newErrors = { ...lessonErrors };
+      delete newErrors[index];
+      setLessonErrors(newErrors);
+      return true;
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        setLessonErrors(prev => ({
+          ...prev,
+          [index]: error.errors.map(e => e.message)
+        }));
+      }
+      return false;
+    }
+  };
+
+  // Add template management functions
+  const duplicateLesson = (index: number) => {
+    const lessonToDuplicate = projectData.lessons[index];
+    const duplicatedLesson = {
+      ...lessonToDuplicate,
+      id: crypto.randomUUID(),
+      title: `${lessonToDuplicate.title} (Copy)`,
+    };
+    
+    setProjectData(prev => ({
+      ...prev,
+      lessons: [
+        ...prev.lessons.slice(0, index + 1),
+        duplicatedLesson,
+        ...prev.lessons.slice(index + 1),
+      ],
+    }));
+    setIsFormDirty(true);
+  };
+
+  const exportLesson = (lesson: Lesson) => {
+    const jsonString = exportLessonToJSON(lesson);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    saveAs(blob, `lesson-${lesson.title.toLowerCase().replace(/\s+/g, '-')}.json`);
+  };
+
+  const importLesson = async (file: File) => {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      
+      if (!validateImportedLesson(data)) {
+        throw new Error('Invalid lesson format');
+      }
+
+      setProjectData(prev => ({
+        ...prev,
+        lessons: [...prev.lessons, { ...data, id: crypto.randomUUID() }],
+      }));
+      setIsFormDirty(true);
+
+      toast({
+        title: "Lesson imported successfully",
+        description: "The lesson has been added to your project",
+      });
+    } catch (error) {
+      toast({
+        title: "Error importing lesson",
+        description: "Failed to import lesson. Please check the file format.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Add template customization dialog state
+  const [customTemplateDialogOpen, setCustomTemplateDialogOpen] = useState(false);
+  const [customTemplate, setCustomTemplate] = useState<{
+    name: string;
+    category: LessonTemplate['category'];
+    description: string;
+    template: {
+      title: string;
+      description: string;
+      videoUrl: string;
+      imageFile: null;
+      resources: never[];
+    };
+  }>({
+    name: '',
+    category: 'project',
+    description: '',
+    template: {
+      title: '',
+      description: '',
+      videoUrl: '',
+      imageFile: null,
+      resources: [],
+    },
+  });
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-100 via-blue-100 to-purple-100 p-8">
       {/* Navigation - Simplified */}
@@ -395,6 +609,26 @@ export default function CreateProjectPage() {
                 />
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="subject">Subject</Label>
+                <Select
+                  value={projectData.subject}
+                  onValueChange={(value) => setProjectData(prev => ({ ...prev, subject: value as typeof prev.subject }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a subject" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="math">Mathematics</SelectItem>
+                    <SelectItem value="science">Science</SelectItem>
+                    <SelectItem value="history">History</SelectItem>
+                    <SelectItem value="geography">Geography</SelectItem>
+                    <SelectItem value="reading">Reading</SelectItem>
+                    <SelectItem value="art">Art</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               {/* Media Uploads */}
               <div className="space-y-2">
                 <Label htmlFor="featuredImage">Featured Image</Label>
@@ -447,84 +681,198 @@ export default function CreateProjectPage() {
                 <AccordionItem value="lessons">
                   <AccordionTrigger>Project Lessons / Steps</AccordionTrigger>
                   <AccordionContent>
-                    {projectData.lessons.map((lesson, index) => (
-                      <Card key={index} className="mb-4">
-                        <CardHeader>
-                          <CardTitle className="text-xl">Lesson {index + 1}</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          {/* Lesson Fields */}
-                          <div className="space-y-2">
-                            <Label htmlFor={`lesson-${index}-title`}>Lesson Title</Label>
-                            <Input
-                              id={`lesson-${index}-title`}
-                              value={lesson.title}
-                              onChange={(e) => handleLessonChange(index, 'title', e.target.value)}
-                              required
-                            />
+                    {/* Template Management */}
+                    <div className="mb-4 space-y-4">
+                      <div className="flex justify-between items-center">
+                        <Label>Lesson Templates</Label>
+                        <Button
+                          variant="outline"
+                          onClick={() => setCustomTemplateDialogOpen(true)}
+                        >
+                          Create Template
+                        </Button>
+                      </div>
+                      
+                      {/* Template Categories */}
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        {Object.entries(
+                          lessonTemplates.reduce((acc, template) => ({
+                            ...acc,
+                            [template.category]: [
+                              ...(acc[template.category] || []),
+                              template,
+                            ],
+                          }), {} as Record<string, typeof lessonTemplates>)
+                        ).map(([category, templates]) => (
+                          <div key={category} className="space-y-2">
+                            <h3 className="font-medium capitalize">{category}</h3>
+                            <div className="space-y-1">
+                              {templates.map(template => (
+                                <Button
+                                  key={template.id}
+                                  variant="ghost"
+                                  className="w-full justify-start text-sm"
+                                  onClick={() => applyTemplate(template.id)}
+                                >
+                                  {template.name}
+                                </Button>
+                              ))}
+                            </div>
                           </div>
-                          <div className="space-y-2">
-                            <Label htmlFor={`lesson-${index}-description`}>Lesson Description</Label>
-                            <Textarea
-                              id={`lesson-${index}-description`}
-                              value={lesson.description}
-                              onChange={(e) => handleLessonChange(index, 'description', e.target.value)}
-                              required
-                            />
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Lesson List */}
+                    <DragDropContext onDragEnd={handleLessonReorder}>
+                      <Droppable droppableId="lessons">
+                        {(provided) => (
+                          <div {...provided.droppableProps} ref={provided.innerRef}>
+                            {projectData.lessons.map((lesson, index) => (
+                              <Draggable
+                                key={lesson.id}
+                                draggableId={lesson.id}
+                                index={index}
+                              >
+                                {(provided) => (
+                                  <div
+                                    ref={provided.innerRef}
+                                    {...provided.draggableProps}
+                                  >
+                                    <Card className="mb-4">
+                                      <CardHeader>
+                                        <div className="flex items-center justify-between">
+                                          <CardTitle className="text-xl">
+                                            Lesson {index + 1}
+                                          </CardTitle>
+                                          <div className="flex items-center gap-2">
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => duplicateLesson(index)}
+                                            >
+                                              Duplicate
+                                            </Button>
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => exportLesson(lesson)}
+                                            >
+                                              Export
+                                            </Button>
+                                            <div {...provided.dragHandleProps} className="cursor-move">
+                                              ⋮
+                                            </div>
+                                            {/* Preview Button */}
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => setPreviewLesson(lesson)}
+                                            >
+                                              Preview
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      </CardHeader>
+                                      <CardContent className="space-y-4">
+                                        {/* Existing lesson fields */}
+                                        {/* ... */}
+                                        
+                                        {/* Validation Errors */}
+                                        {lessonErrors[index]?.map((error, i) => (
+                                          <p key={i} className="text-sm text-red-500">
+                                            {error}
+                                          </p>
+                                        ))}
+                                      </CardContent>
+                                      <CardFooter>
+                                        <Button
+                                          type="button"
+                                          variant="destructive"
+                                          onClick={() => removeLesson(index)}
+                                          disabled={projectData.lessons.length === 1}
+                                        >
+                                          <Minus className="mr-2 h-4 w-4" /> Remove Lesson
+                                        </Button>
+                                      </CardFooter>
+                                    </Card>
+                                  </div>
+                                )}
+                              </Draggable>
+                            ))}
+                            {provided.placeholder}
                           </div>
-                          <div className="space-y-2">
-                            <Label htmlFor={`lesson-${index}-video`}>Lesson Video URL</Label>
-                            <Input
-                              id={`lesson-${index}-video`}
-                              type="url"
-                              value={lesson.videoUrl}
-                              onChange={(e) => handleLessonChange(index, 'videoUrl', e.target.value)}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor={`lesson-${index}-image`}>Lesson Image</Label>
-                            <Input
-                              id={`lesson-${index}-image`}
-                              type="file"
-                              accept="image/*"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) handleLessonChange(index, 'imageFile', file);
-                              }}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor={`lesson-${index}-resources`}>Lesson Resources (PDFs)</Label>
-                            <Input
-                              id={`lesson-${index}-resources`}
-                              type="file"
-                              accept=".pdf"
-                              multiple
-                              onChange={(e) => {
-                                const files = e.target.files;
-                                if (files) handleLessonChange(index, 'resources', Array.from(files));
-                              }}
-                            />
-                          </div>
-                        </CardContent>
-                        <CardFooter>
-                          <Button
-                            type="button"
-                            variant="destructive"
-                            onClick={() => removeLesson(index)}
-                            disabled={projectData.lessons.length === 1}
-                          >
-                            <Minus className="mr-2 h-4 w-4" /> Remove Lesson
-                          </Button>
-                        </CardFooter>
-                      </Card>
-                    ))}
-                    <Button type="button" onClick={addLesson} className="mt-4">
-                      <Plus className="mr-2 h-4 w-4" /> Add Lesson
-                    </Button>
+                        )}
+                      </Droppable>
+                    </DragDropContext>
+
+                    {/* Import Lesson Button */}
+                    <div className="flex gap-2 mt-4">
+                      <Button type="button" onClick={addLesson}>
+                        <Plus className="mr-2 h-4 w-4" /> Add Lesson
+                      </Button>
+                      <Input
+                        type="file"
+                        accept=".json"
+                        className="hidden"
+                        id="import-lesson"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) importLesson(file);
+                        }}
+                      />
+                      <Button
+                        variant="outline"
+                        onClick={() => document.getElementById('import-lesson')?.click()}
+                      >
+                        Import Lesson
+                      </Button>
+                    </div>
                   </AccordionContent>
                 </AccordionItem>
               </Accordion>
+
+              {/* Lesson Preview Dialog */}
+              <Dialog open={!!previewLesson} onOpenChange={() => setPreviewLesson(null)}>
+                <DialogContent className="max-w-3xl">
+                  <DialogHeader>
+                    <DialogTitle>{previewLesson?.title}</DialogTitle>
+                  </DialogHeader>
+                  <ScrollArea className="max-h-[600px]">
+                    <div className="space-y-4 p-4">
+                      {previewLesson?.imageFile && (
+                        <div className="relative w-full h-48">
+                          <img
+                            src={URL.createObjectURL(previewLesson.imageFile)}
+                            alt={previewLesson.title}
+                            className="object-cover rounded-lg"
+                          />
+                        </div>
+                      )}
+                      <Markdown>{previewLesson?.description || ''}</Markdown>
+                      {previewLesson?.videoUrl && (
+                        <div className="aspect-video">
+                          <iframe
+                            src={previewLesson.videoUrl}
+                            className="w-full h-full"
+                            allowFullScreen
+                          />
+                        </div>
+                      )}
+                      {previewLesson?.resources?.length > 0 && (
+                        <div>
+                          <h3 className="font-medium mb-2">Resources</h3>
+                          <ul className="list-disc pl-5">
+                            {previewLesson?.resources?.map((file, i) => (
+                              <li key={i}>{file.name}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </DialogContent>
+              </Dialog>
 
               {/* Add error messages */}
               {errors.title && (
@@ -642,6 +990,114 @@ export default function CreateProjectPage() {
                 </div>
               )}
 
+              {/* Draft Saving Indicator */}
+              <div className="flex justify-between items-center text-sm text-gray-500 mb-6">
+                <div>
+                  {autoSaveStatus === 'saving' && 'Saving draft...'}
+                  {autoSaveStatus === 'saved' && 'Draft saved'}
+                  {autoSaveStatus === 'error' && 'Failed to save draft'}
+                </div>
+                {autoSaveStatus === 'saved' && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      const previousDraft = localStorage.getItem('previous-draft-project');
+                      if (previousDraft) {
+                        setProjectData(JSON.parse(previousDraft));
+                        toast({
+                          title: "Draft restored",
+                          description: "Previous version restored successfully",
+                        });
+                      }
+                    }}
+                  >
+                    Undo Changes
+                  </Button>
+                )}
+              </div>
+
+              {/* Difficulty Level */}
+              <div className="space-y-2">
+                <Label htmlFor="difficulty">Difficulty Level</Label>
+                <Select
+                  value={projectData.difficulty}
+                  onValueChange={(value) => {
+                    setProjectData(prev => ({ ...prev, difficulty: value as typeof prev.difficulty }));
+                    setIsFormDirty(true);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select difficulty" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="beginner">Beginner</SelectItem>
+                    <SelectItem value="intermediate">Intermediate</SelectItem>
+                    <SelectItem value="advanced">Advanced</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Estimated Duration */}
+              <div className="space-y-2">
+                <Label htmlFor="estimatedDuration">Estimated Duration</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="estimatedDuration"
+                    name="estimatedDuration"
+                    type="number"
+                    min="1"
+                    placeholder="Duration"
+                    value={projectData.estimatedDuration}
+                    onChange={handleInputChange}
+                    className="w-32"
+                  />
+                  <Select
+                    value={projectData.durationUnit}
+                    onValueChange={(value) => {
+                      setProjectData(prev => ({ ...prev, durationUnit: value as typeof prev.durationUnit }));
+                      setIsFormDirty(true);
+                    }}
+                  >
+                    <SelectTrigger className="w-[120px]">
+                      <SelectValue placeholder="Unit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="minutes">Minutes</SelectItem>
+                      <SelectItem value="hours">Hours</SelectItem>
+                      <SelectItem value="days">Days</SelectItem>
+                      <SelectItem value="weeks">Weeks</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Learning Objectives */}
+              <div className="space-y-2">
+                <Label htmlFor="learningObjectives">Learning Objectives</Label>
+                <Textarea
+                  id="learningObjectives"
+                  name="learningObjectives"
+                  placeholder="What will students learn from this project?"
+                  value={projectData.learningObjectives}
+                  onChange={handleInputChange}
+                  className="min-h-[100px]"
+                />
+              </div>
+
+              {/* Prerequisites */}
+              <div className="space-y-2">
+                <Label htmlFor="prerequisites">Prerequisites</Label>
+                <Textarea
+                  id="prerequisites"
+                  name="prerequisites"
+                  placeholder="What should students know before starting?"
+                  value={projectData.prerequisites}
+                  onChange={handleInputChange}
+                  className="min-h-[100px]"
+                />
+              </div>
+
               <Button 
                 type="submit" 
                 className="w-full"
@@ -671,6 +1127,98 @@ export default function CreateProjectPage() {
         description="Are you sure you want to create this project? This action cannot be undone."
         confirmText="Create Project"
       />
+
+      {/* Custom Template Dialog */}
+      <Dialog open={customTemplateDialogOpen} onOpenChange={setCustomTemplateDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Custom Template</DialogTitle>
+            <DialogDescription>
+              Create a reusable lesson template
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Template Name</Label>
+              <Input
+                value={customTemplate.name}
+                onChange={(e) => setCustomTemplate(prev => ({
+                  ...prev,
+                  name: e.target.value
+                }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <Select
+                value={customTemplate.category}
+                onValueChange={(value: LessonTemplate['category']) => 
+                  setCustomTemplate(prev => ({
+                    ...prev,
+                    category: value
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="research">Research</SelectItem>
+                  <SelectItem value="experiment">Experiment</SelectItem>
+                  <SelectItem value="presentation">Presentation</SelectItem>
+                  <SelectItem value="discussion">Discussion</SelectItem>
+                  <SelectItem value="project">Project</SelectItem>
+                  <SelectItem value="assessment">Assessment</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea
+                value={customTemplate.description}
+                onChange={(e) => setCustomTemplate(prev => ({
+                  ...prev,
+                  description: e.target.value
+                }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Template Content</Label>
+              <Textarea
+                value={customTemplate.template.description}
+                onChange={(e) => setCustomTemplate(prev => ({
+                  ...prev,
+                  template: {
+                    ...prev.template,
+                    description: e.target.value
+                  }
+                }))}
+                className="min-h-[200px]"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                const newTemplate = createCustomTemplate(
+                  customTemplate.name,
+                  customTemplate.category,
+                  customTemplate.description,
+                  customTemplate.template
+                );
+                lessonTemplates.push(newTemplate);
+                setCustomTemplateDialogOpen(false);
+                toast({
+                  title: "Template created",
+                  description: "Your custom template has been added",
+                });
+              }}
+            >
+              Create Template
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

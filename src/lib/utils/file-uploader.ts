@@ -46,6 +46,9 @@ type UploadState = {
   startTime: number;
   lastUpdateTime: number;
   lastUploadedSize: number;
+  uploadedFiles: number;
+  currentFileName: string;
+  currentFileProgress: number;
 };
 
 export class FileUploader {
@@ -62,6 +65,9 @@ export class FileUploader {
     startTime: Date.now(),
     lastUpdateTime: Date.now(),
     lastUploadedSize: 0,
+    uploadedFiles: 0,
+    currentFileName: '',
+    currentFileProgress: 0,
   };
   private bandwidthThrottle: number = 0;
   private errors: Record<string, UploadError[]> = {};
@@ -351,5 +357,24 @@ export class FileUploader {
   private updateProgress(details: UploadProgressDetails): void {
     this.options.onProgress?.(details.overallProgress);
     this.options.onDetailedProgress?.(details);
+  }
+
+  private calculateSpeed(): number {
+    const now = Date.now();
+    const timeDiff = (now - this.uploadState.lastUpdateTime) / 1000;
+    const sizeDiff = this.uploadState.uploadedSize - this.uploadState.lastUploadedSize;
+    return sizeDiff / timeDiff;
+  }
+
+  private calculateEstimatedTimeRemaining(speed: number): number {
+    const remainingSize = this.uploadState.totalSize - this.uploadState.uploadedSize;
+    return speed > 0 ? remainingSize / speed : 0;
+  }
+
+  private calculateRetryDelay(attempt: number): number {
+    return Math.min(
+      this.options.initialRetryDelay * Math.pow(2, attempt - 1),
+      this.options.maxRetryDelay
+    );
   }
 } 
