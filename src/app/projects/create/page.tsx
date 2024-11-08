@@ -50,6 +50,7 @@ import {
   LessonTemplate
 } from '@/lib/templates/lesson-templates';
 import dynamic from 'next/dynamic';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
 
 const DragDropContext = dynamic(
   () => import('react-beautiful-dnd').then(mod => mod.DragDropContext),
@@ -600,12 +601,13 @@ export default function CreateProjectPage() {
 
               <div className="space-y-2">
                 <Label htmlFor="summary">Project Summary</Label>
-                <Textarea
-                  id="summary"
-                  name="summary"
+                <RichTextEditor
                   value={projectData.summary}
-                  onChange={handleInputChange}
-                  required
+                  onChange={(value) => {
+                    setProjectData(prev => ({ ...prev, summary: value }));
+                    setIsFormDirty(true);
+                  }}
+                  placeholder="Enter project summary..."
                 />
               </div>
 
@@ -1075,26 +1077,26 @@ export default function CreateProjectPage() {
               {/* Learning Objectives */}
               <div className="space-y-2">
                 <Label htmlFor="learningObjectives">Learning Objectives</Label>
-                <Textarea
-                  id="learningObjectives"
-                  name="learningObjectives"
-                  placeholder="What will students learn from this project?"
+                <RichTextEditor
                   value={projectData.learningObjectives}
-                  onChange={handleInputChange}
-                  className="min-h-[100px]"
+                  onChange={(value) => {
+                    setProjectData(prev => ({ ...prev, learningObjectives: value }));
+                    setIsFormDirty(true);
+                  }}
+                  placeholder="What will students learn from this project?"
                 />
               </div>
 
               {/* Prerequisites */}
               <div className="space-y-2">
                 <Label htmlFor="prerequisites">Prerequisites</Label>
-                <Textarea
-                  id="prerequisites"
-                  name="prerequisites"
-                  placeholder="What should students know before starting?"
+                <RichTextEditor
                   value={projectData.prerequisites}
-                  onChange={handleInputChange}
-                  className="min-h-[100px]"
+                  onChange={(value) => {
+                    setProjectData(prev => ({ ...prev, prerequisites: value }));
+                    setIsFormDirty(true);
+                  }}
+                  placeholder="What should students know before starting?"
                 />
               </div>
 
