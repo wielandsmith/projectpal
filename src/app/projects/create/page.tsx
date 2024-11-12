@@ -30,7 +30,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { lessonTemplates } from '@/lib/templates/lesson-templates';
 import { 
   Dialog,
   DialogContent,
@@ -51,6 +50,7 @@ import {
 } from '@/lib/templates/lesson-templates';
 import dynamic from 'next/dynamic';
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
+import { createProject } from '@/app/actions/projects';
 
 const DragDropContext = dynamic(
   () => import('react-beautiful-dnd').then(mod => mod.DragDropContext),
@@ -68,10 +68,14 @@ const Draggable = dynamic(
 type Lesson = {
   id: string;
   title: string;
+  summary: string;
   description: string;
   videoUrl: string;
   imageFile: File | null;
   resources: File[];
+  documentation: string;
+  estimatedDuration: number;
+  durationUnit: 'minutes' | 'hours';
 }
 
 type ProjectData = {
@@ -92,14 +96,35 @@ type ProjectData = {
 
 // Validation schema
 const projectSchema = z.object({
-  title: z.string().min(3, "Title must be at least 3 characters"),
-  summary: z.string().min(10, "Summary must be at least 10 characters"),
-  introVideoUrl: z.string().url().optional().or(z.literal("")),
+  title: z.string()
+    .min(3, "Title must be at least 3 characters")
+    .max(100, "Title must be less than 100 characters"),
+  summary: z.string()
+    .min(10, "Summary must be at least 10 characters")
+    .max(5000, "Summary must be less than 5000 characters"),
+  subject: z.enum(['math', 'science', 'history', 'geography', 'reading', 'art'], {
+    required_error: "Please select a subject",
+  }),
+  difficulty: z.enum(['beginner', 'intermediate', 'advanced'], {
+    required_error: "Please select a difficulty level",
+  }),
+  estimatedDuration: z.number()
+    .min(1, "Duration must be at least 1")
+    .max(999, "Duration must be less than 999"),
+  durationUnit: z.enum(['minutes', 'hours', 'days', 'weeks']),
+  learningObjectives: z.string()
+    .min(10, "Learning objectives must be at least 10 characters"),
+  prerequisites: z.string()
+    .optional(),
   lessons: z.array(z.object({
-    title: z.string().min(3, "Lesson title must be at least 3 characters"),
-    description: z.string().min(10, "Lesson description must be at least 10 characters"),
+    title: z.string()
+      .min(3, "Lesson title must be at least 3 characters")
+      .max(100, "Lesson title must be less than 100 characters"),
+    description: z.string()
+      .min(10, "Lesson description must be at least 10 characters")
+      .max(5000, "Description must be less than 5000 characters"),
     videoUrl: z.string().url().optional().or(z.literal("")),
-  }))
+  })).min(1, "At least one lesson is required"),
 });
 
 // File validation constants
@@ -133,7 +158,18 @@ export default function CreateProjectPage() {
     introVideoUrl: '',
     materials: [],
     resources: [],
-    lessons: [{ id: crypto.randomUUID(), title: '', description: '', videoUrl: '', imageFile: null, resources: [] }],
+    lessons: [{
+      id: crypto.randomUUID(),
+      title: '',
+      summary: '',
+      description: '',
+      videoUrl: '',
+      imageFile: null,
+      resources: [],
+      documentation: '',
+      estimatedDuration: 0,
+      durationUnit: 'minutes'
+    }],
     subject: 'math',
     difficulty: 'beginner',
     estimatedDuration: 0,
@@ -165,6 +201,10 @@ export default function CreateProjectPage() {
   
   // Debounce project data changes for auto-save
   const debouncedProjectData = useDebounce(projectData, 1000);
+
+  // Add these state variables
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   // Auto-save effect
   useEffect(() => {
@@ -251,7 +291,10 @@ export default function CreateProjectPage() {
         description: '',
         videoUrl: '',
         imageFile: null,
-        resources: []
+        resources: [],
+        documentation: '',
+        estimatedDuration: 0,
+        durationUnit: 'minutes'
       }]
     }));
   };
@@ -293,7 +336,7 @@ export default function CreateProjectPage() {
     setShowConfirmDialog(false);
     
     try {
-      // Collect all files that need to be uploaded
+      // Upload files first
       const files = [
         { file: projectData.featuredImage, path: `featured/${Date.now()}-${projectData.featuredImage?.name}` },
         ...projectData.materials.map(file => ({
@@ -316,10 +359,13 @@ export default function CreateProjectPage() {
         ]).filter(Boolean)
       ].filter((item): item is { file: File; path: string } => item?.file != null);
 
-      // Upload all files in batches
+      // Upload all files
       for (const { file, path } of files) {
         await fileUploader.addToQueue(file, path);
       }
+
+      // Create project in database
+      await createProject(projectData);
 
       toast({
         title: "Project created successfully!",
@@ -439,21 +485,6 @@ export default function CreateProjectPage() {
     setIsFormDirty(true);
   };
 
-  // Add lesson template function
-  const applyTemplate = (templateId: string) => {
-    const template = lessonTemplates.find(t => t.id === templateId);
-    if (!template) return;
-
-    setProjectData(prev => ({
-      ...prev,
-      lessons: [...prev.lessons, {
-        id: crypto.randomUUID(),
-        ...template.template
-      }]
-    }));
-    setIsFormDirty(true);
-  };
-
   // Add lesson validation function
   const validateLesson = (lesson: Lesson, index: number) => {
     try {
@@ -527,32 +558,6 @@ export default function CreateProjectPage() {
     }
   };
 
-  // Add template customization dialog state
-  const [customTemplateDialogOpen, setCustomTemplateDialogOpen] = useState(false);
-  const [customTemplate, setCustomTemplate] = useState<{
-    name: string;
-    category: LessonTemplate['category'];
-    description: string;
-    template: {
-      title: string;
-      description: string;
-      videoUrl: string;
-      imageFile: null;
-      resources: never[];
-    };
-  }>({
-    name: '',
-    category: 'project',
-    description: '',
-    template: {
-      title: '',
-      description: '',
-      videoUrl: '',
-      imageFile: null,
-      resources: [],
-    },
-  });
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-100 via-blue-100 to-purple-100 p-8">
       {/* Navigation - Simplified */}
@@ -588,251 +593,328 @@ export default function CreateProjectPage() {
               </div>
 
               {/* Project Basic Info */}
-              <div className="space-y-2">
-                <Label htmlFor="title">Project Title</Label>
-                <Input
-                  id="title"
-                  name="title"
-                  value={projectData.title}
-                  onChange={handleInputChange}
-                  required
-                />
+              <div id="basic-info" className="space-y-6">
+                <h3 className="text-lg font-medium">Basic Information</h3>
+                <div className="space-y-2">
+                  <Label htmlFor="title">Project Title</Label>
+                  <Input
+                    id="title"
+                    name="title"
+                    value={projectData.title}
+                    onChange={handleInputChange}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="summary">Project Summary</Label>
+                  <RichTextEditor
+                    value={projectData.summary}
+                    onChange={(value) => {
+                      setProjectData(prev => ({ ...prev, summary: value }));
+                      setIsFormDirty(true);
+                    }}
+                    placeholder="Enter project summary..."
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="subject">Subject</Label>
+                  <Select
+                    value={projectData.subject}
+                    onValueChange={(value) => setProjectData(prev => ({ ...prev, subject: value as typeof prev.subject }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a subject" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="math">Mathematics</SelectItem>
+                      <SelectItem value="science">Science</SelectItem>
+                      <SelectItem value="history">History</SelectItem>
+                      <SelectItem value="geography">Geography</SelectItem>
+                      <SelectItem value="reading">Reading</SelectItem>
+                      <SelectItem value="art">Art</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="summary">Project Summary</Label>
-                <RichTextEditor
-                  value={projectData.summary}
-                  onChange={(value) => {
-                    setProjectData(prev => ({ ...prev, summary: value }));
-                    setIsFormDirty(true);
-                  }}
-                  placeholder="Enter project summary..."
-                />
-              </div>
+              {/* Media Section */}
+              <div id="media" className="space-y-6">
+                <h3 className="text-lg font-medium">Media & Resources</h3>
+                <div className="space-y-2">
+                  <Label htmlFor="featuredImage">Featured Image</Label>
+                  <FileDropZone
+                    onFileSelect={(files) => handleFileSelect(files, 'featuredImage')}
+                    accept={ACCEPTED_IMAGE_TYPES}
+                    maxSize={MAX_FILE_SIZE}
+                    maxFiles={1}
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="subject">Subject</Label>
-                <Select
-                  value={projectData.subject}
-                  onValueChange={(value) => setProjectData(prev => ({ ...prev, subject: value as typeof prev.subject }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a subject" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="math">Mathematics</SelectItem>
-                    <SelectItem value="science">Science</SelectItem>
-                    <SelectItem value="history">History</SelectItem>
-                    <SelectItem value="geography">Geography</SelectItem>
-                    <SelectItem value="reading">Reading</SelectItem>
-                    <SelectItem value="art">Art</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                <div className="space-y-2">
+                  <Label htmlFor="introVideoUrl">Introduction Video URL</Label>
+                  <Input
+                    id="introVideoUrl"
+                    name="introVideoUrl"
+                    type="url"
+                    value={projectData.introVideoUrl}
+                    onChange={handleInputChange}
+                  />
+                </div>
 
-              {/* Media Uploads */}
-              <div className="space-y-2">
-                <Label htmlFor="featuredImage">Featured Image</Label>
-                <FileDropZone
-                  onFileSelect={(files) => handleFileSelect(files, 'featuredImage')}
-                  accept={ACCEPTED_IMAGE_TYPES}
-                  maxSize={MAX_FILE_SIZE}
-                  maxFiles={1}
-                />
-              </div>
+                <div className="space-y-2">
+                  <Label htmlFor="materials">Project Materials (PDFs)</Label>
+                  <Input
+                    id="materials"
+                    name="materials"
+                    type="file"
+                    accept=".pdf"
+                    multiple
+                    onChange={(e) => handleFileChange(e, 'materials')}
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="introVideoUrl">Introduction Video URL</Label>
-                <Input
-                  id="introVideoUrl"
-                  name="introVideoUrl"
-                  type="url"
-                  value={projectData.introVideoUrl}
-                  onChange={handleInputChange}
-                />
-              </div>
-
-              {/* Project Resources */}
-              <div className="space-y-2">
-                <Label htmlFor="materials">Project Materials (PDFs)</Label>
-                <Input
-                  id="materials"
-                  name="materials"
-                  type="file"
-                  accept=".pdf"
-                  multiple
-                  onChange={(e) => handleFileChange(e, 'materials')}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="resources">Additional Resources (PDFs)</Label>
-                <Input
-                  id="resources"
-                  name="resources"
-                  type="file"
-                  accept=".pdf"
-                  multiple
-                  onChange={(e) => handleFileChange(e, 'resources')}
-                />
+                <div className="space-y-2">
+                  <Label htmlFor="resources">Additional Resources (PDFs)</Label>
+                  <Input
+                    id="resources"
+                    name="resources"
+                    type="file"
+                    accept=".pdf"
+                    multiple
+                    onChange={(e) => handleFileChange(e, 'resources')}
+                  />
+                </div>
               </div>
 
               {/* Lessons Section */}
-              <Accordion type="single" collapsible className="w-full">
-                <AccordionItem value="lessons">
-                  <AccordionTrigger>Project Lessons / Steps</AccordionTrigger>
-                  <AccordionContent>
-                    {/* Template Management */}
-                    <div className="mb-4 space-y-4">
-                      <div className="flex justify-between items-center">
-                        <Label>Lesson Templates</Label>
+              <div id="lessons" className="space-y-6">
+                <h3 className="text-lg font-medium">Lessons & Steps</h3>
+                <Accordion type="single" collapsible className="w-full">
+                  <AccordionItem value="lessons">
+                    <AccordionTrigger>Project Lessons / Steps</AccordionTrigger>
+                    <AccordionContent>
+                      {/* Lesson List */}
+                      <DragDropContext onDragEnd={handleLessonReorder}>
+                        <Droppable 
+                          droppableId="lessons" 
+                          isDropDisabled={false}
+                          isCombineEnabled={false}
+                          ignoreContainerClipping={false}
+                        >
+                          {(provided) => (
+                            <div 
+                              {...provided.droppableProps} 
+                              ref={provided.innerRef}
+                              className="space-y-4"
+                            >
+                              {projectData.lessons.map((lesson, index) => (
+                                <Draggable
+                                  key={lesson.id}
+                                  draggableId={lesson.id}
+                                  index={index}
+                                  isDragDisabled={false}
+                                >
+                                  {(provided) => (
+                                    <div
+                                      ref={provided.innerRef}
+                                      {...provided.draggableProps}
+                                      {...provided.dragHandleProps}
+                                      className="relative"
+                                    >
+                                      <Card className="mb-4">
+                                        <CardHeader>
+                                          <div className="flex items-center justify-between">
+                                            <CardTitle className="text-xl">
+                                              Step {index + 1}
+                                            </CardTitle>
+                                            <div className="flex items-center gap-2">
+                                              <div {...provided.dragHandleProps} className="cursor-move">
+                                                ⋮
+                                              </div>
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => setPreviewLesson(lesson)}
+                                              >
+                                                Preview
+                                              </Button>
+                                            </div>
+                                          </div>
+                                        </CardHeader>
+                                        <CardContent className="space-y-4">
+                                          {/* Title */}
+                                          <div className="space-y-2">
+                                            <Label>Step Title</Label>
+                                            <Input
+                                              value={lesson.title}
+                                              onChange={(e) => handleLessonChange(index, 'title', e.target.value)}
+                                              placeholder="Enter step title..."
+                                            />
+                                          </div>
+
+                                          {/* Summary */}
+                                          <div className="space-y-2">
+                                            <Label>Summary</Label>
+                                            <Textarea
+                                              value={lesson.summary}
+                                              onChange={(e) => handleLessonChange(index, 'summary', e.target.value)}
+                                              placeholder="Brief summary of this step..."
+                                            />
+                                          </div>
+
+                                          {/* Detailed Description */}
+                                          <div className="space-y-2">
+                                            <Label>Detailed Description</Label>
+                                            <RichTextEditor
+                                              value={lesson.description}
+                                              onChange={(value) => handleLessonChange(index, 'description', value)}
+                                              placeholder="Detailed step-by-step instructions..."
+                                            />
+                                          </div>
+
+                                          {/* Featured Media */}
+                                          <div className="space-y-4">
+                                            <div className="space-y-2">
+                                              <Label>Featured Image</Label>
+                                              <FileDropZone
+                                                onFileSelect={(files) => handleLessonChange(index, 'imageFile', files[0])}
+                                                accept={ACCEPTED_IMAGE_TYPES}
+                                                maxSize={MAX_FILE_SIZE}
+                                                maxFiles={1}
+                                              />
+                                              {lesson.imageFile && (
+                                                <FilePreview
+                                                  file={lesson.imageFile}
+                                                  onRemove={() => handleLessonChange(index, 'imageFile', null)}
+                                                />
+                                              )}
+                                            </div>
+
+                                            <div className="space-y-2">
+                                              <Label>Video URL</Label>
+                                              <Input
+                                                type="url"
+                                                value={lesson.videoUrl}
+                                                onChange={(e) => handleLessonChange(index, 'videoUrl', e.target.value)}
+                                                placeholder="Enter video URL..."
+                                              />
+                                            </div>
+                                          </div>
+
+                                          {/* Documentation */}
+                                          <div className="space-y-2">
+                                            <Label>Documentation</Label>
+                                            <RichTextEditor
+                                              value={lesson.documentation}
+                                              onChange={(value) => handleLessonChange(index, 'documentation', value)}
+                                              placeholder="Additional documentation, notes, or resources..."
+                                            />
+                                          </div>
+
+                                          {/* Duration */}
+                                          <div className="space-y-2">
+                                            <Label>Estimated Duration</Label>
+                                            <div className="flex gap-2">
+                                              <Input
+                                                type="number"
+                                                min="0"
+                                                value={lesson.estimatedDuration}
+                                                onChange={(e) => handleLessonChange(index, 'estimatedDuration', parseInt(e.target.value))}
+                                                className="w-24"
+                                              />
+                                              <Select
+                                                value={lesson.durationUnit}
+                                                onValueChange={(value) => handleLessonChange(index, 'durationUnit', value)}
+                                              >
+                                                <SelectTrigger className="w-[110px]">
+                                                  <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                  <SelectItem value="minutes">Minutes</SelectItem>
+                                                  <SelectItem value="hours">Hours</SelectItem>
+                                                </SelectContent>
+                                              </Select>
+                                            </div>
+                                          </div>
+
+                                          {/* Resources */}
+                                          <div className="space-y-2">
+                                            <Label>Step Resources</Label>
+                                            <FileDropZone
+                                              onFileSelect={(files) => handleLessonChange(index, 'resources', [...lesson.resources, ...files])}
+                                              accept={ACCEPTED_DOCUMENT_TYPES}
+                                              maxSize={MAX_FILE_SIZE}
+                                              maxFiles={5}
+                                            />
+                                            {lesson.resources.map((file, fileIndex) => (
+                                              <FilePreview
+                                                key={fileIndex}
+                                                file={file}
+                                                onRemove={() => {
+                                                  const newResources = [...lesson.resources];
+                                                  newResources.splice(fileIndex, 1);
+                                                  handleLessonChange(index, 'resources', newResources);
+                                                }}
+                                              />
+                                            ))}
+                                          </div>
+                                        </CardContent>
+                                        <CardFooter className="flex justify-between">
+                                          <Button
+                                            type="button"
+                                            variant="destructive"
+                                            onClick={() => removeLesson(index)}
+                                            disabled={projectData.lessons.length === 1}
+                                          >
+                                            <Minus className="mr-2 h-4 w-4" /> Remove Step
+                                          </Button>
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={() => duplicateLesson(index)}
+                                          >
+                                            Duplicate Step
+                                          </Button>
+                                        </CardFooter>
+                                      </Card>
+                                    </div>
+                                  )}
+                                </Draggable>
+                              ))}
+                              {provided.placeholder}
+                            </div>
+                          )}
+                        </Droppable>
+                      </DragDropContext>
+
+                      {/* Import Lesson Button */}
+                      <div className="flex gap-2 mt-4">
+                        <Button type="button" onClick={addLesson}>
+                          <Plus className="mr-2 h-4 w-4" /> Add Lesson
+                        </Button>
+                        <Input
+                          type="file"
+                          accept=".json"
+                          className="hidden"
+                          id="import-lesson"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) importLesson(file);
+                          }}
+                        />
                         <Button
                           variant="outline"
-                          onClick={() => setCustomTemplateDialogOpen(true)}
+                          onClick={() => document.getElementById('import-lesson')?.click()}
                         >
-                          Create Template
+                          Import Lesson
                         </Button>
                       </div>
-                      
-                      {/* Template Categories */}
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                        {Object.entries(
-                          lessonTemplates.reduce((acc, template) => ({
-                            ...acc,
-                            [template.category]: [
-                              ...(acc[template.category] || []),
-                              template,
-                            ],
-                          }), {} as Record<string, typeof lessonTemplates>)
-                        ).map(([category, templates]) => (
-                          <div key={category} className="space-y-2">
-                            <h3 className="font-medium capitalize">{category}</h3>
-                            <div className="space-y-1">
-                              {templates.map(template => (
-                                <Button
-                                  key={template.id}
-                                  variant="ghost"
-                                  className="w-full justify-start text-sm"
-                                  onClick={() => applyTemplate(template.id)}
-                                >
-                                  {template.name}
-                                </Button>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Lesson List */}
-                    <DragDropContext onDragEnd={handleLessonReorder}>
-                      <Droppable droppableId="lessons">
-                        {(provided) => (
-                          <div {...provided.droppableProps} ref={provided.innerRef}>
-                            {projectData.lessons.map((lesson, index) => (
-                              <Draggable
-                                key={lesson.id}
-                                draggableId={lesson.id}
-                                index={index}
-                              >
-                                {(provided) => (
-                                  <div
-                                    ref={provided.innerRef}
-                                    {...provided.draggableProps}
-                                  >
-                                    <Card className="mb-4">
-                                      <CardHeader>
-                                        <div className="flex items-center justify-between">
-                                          <CardTitle className="text-xl">
-                                            Lesson {index + 1}
-                                          </CardTitle>
-                                          <div className="flex items-center gap-2">
-                                            <Button
-                                              variant="ghost"
-                                              size="sm"
-                                              onClick={() => duplicateLesson(index)}
-                                            >
-                                              Duplicate
-                                            </Button>
-                                            <Button
-                                              variant="ghost"
-                                              size="sm"
-                                              onClick={() => exportLesson(lesson)}
-                                            >
-                                              Export
-                                            </Button>
-                                            <div {...provided.dragHandleProps} className="cursor-move">
-                                              ⋮
-                                            </div>
-                                            {/* Preview Button */}
-                                            <Button
-                                              variant="ghost"
-                                              size="sm"
-                                              onClick={() => setPreviewLesson(lesson)}
-                                            >
-                                              Preview
-                                            </Button>
-                                          </div>
-                                        </div>
-                                      </CardHeader>
-                                      <CardContent className="space-y-4">
-                                        {/* Existing lesson fields */}
-                                        {/* ... */}
-                                        
-                                        {/* Validation Errors */}
-                                        {lessonErrors[index]?.map((error, i) => (
-                                          <p key={i} className="text-sm text-red-500">
-                                            {error}
-                                          </p>
-                                        ))}
-                                      </CardContent>
-                                      <CardFooter>
-                                        <Button
-                                          type="button"
-                                          variant="destructive"
-                                          onClick={() => removeLesson(index)}
-                                          disabled={projectData.lessons.length === 1}
-                                        >
-                                          <Minus className="mr-2 h-4 w-4" /> Remove Lesson
-                                        </Button>
-                                      </CardFooter>
-                                    </Card>
-                                  </div>
-                                )}
-                              </Draggable>
-                            ))}
-                            {provided.placeholder}
-                          </div>
-                        )}
-                      </Droppable>
-                    </DragDropContext>
-
-                    {/* Import Lesson Button */}
-                    <div className="flex gap-2 mt-4">
-                      <Button type="button" onClick={addLesson}>
-                        <Plus className="mr-2 h-4 w-4" /> Add Lesson
-                      </Button>
-                      <Input
-                        type="file"
-                        accept=".json"
-                        className="hidden"
-                        id="import-lesson"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) importLesson(file);
-                        }}
-                      />
-                      <Button
-                        variant="outline"
-                        onClick={() => document.getElementById('import-lesson')?.click()}
-                      >
-                        Import Lesson
-                      </Button>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+              </div>
 
               {/* Lesson Preview Dialog */}
               <Dialog open={!!previewLesson} onOpenChange={() => setPreviewLesson(null)}>
@@ -1019,85 +1101,90 @@ export default function CreateProjectPage() {
                 )}
               </div>
 
-              {/* Difficulty Level */}
-              <div className="space-y-2">
-                <Label htmlFor="difficulty">Difficulty Level</Label>
-                <Select
-                  value={projectData.difficulty}
-                  onValueChange={(value) => {
-                    setProjectData(prev => ({ ...prev, difficulty: value as typeof prev.difficulty }));
-                    setIsFormDirty(true);
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select difficulty" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="beginner">Beginner</SelectItem>
-                    <SelectItem value="intermediate">Intermediate</SelectItem>
-                    <SelectItem value="advanced">Advanced</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Estimated Duration */}
-              <div className="space-y-2">
-                <Label htmlFor="estimatedDuration">Estimated Duration</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="estimatedDuration"
-                    name="estimatedDuration"
-                    type="number"
-                    min="1"
-                    placeholder="Duration"
-                    value={projectData.estimatedDuration}
-                    onChange={handleInputChange}
-                    className="w-32"
-                  />
+              {/* Settings Section */}
+              <div id="settings" className="space-y-6">
+                <h3 className="text-lg font-medium">Project Settings</h3>
+                
+                {/* Difficulty Level */}
+                <div className="space-y-2">
+                  <Label htmlFor="difficulty">Difficulty Level</Label>
                   <Select
-                    value={projectData.durationUnit}
+                    value={projectData.difficulty}
                     onValueChange={(value) => {
-                      setProjectData(prev => ({ ...prev, durationUnit: value as typeof prev.durationUnit }));
+                      setProjectData(prev => ({ ...prev, difficulty: value as typeof prev.difficulty }));
                       setIsFormDirty(true);
                     }}
                   >
-                    <SelectTrigger className="w-[120px]">
-                      <SelectValue placeholder="Unit" />
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select difficulty" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="minutes">Minutes</SelectItem>
-                      <SelectItem value="hours">Hours</SelectItem>
-                      <SelectItem value="days">Days</SelectItem>
-                      <SelectItem value="weeks">Weeks</SelectItem>
+                      <SelectItem value="beginner">Beginner</SelectItem>
+                      <SelectItem value="intermediate">Intermediate</SelectItem>
+                      <SelectItem value="advanced">Advanced</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
 
-              {/* Learning Objectives */}
-              <div className="space-y-2">
-                <Label htmlFor="learningObjectives">Learning Objectives</Label>
-                <RichTextEditor
-                  value={projectData.learningObjectives}
-                  onChange={(value) => {
-                    setProjectData(prev => ({ ...prev, learningObjectives: value }));
-                    setIsFormDirty(true);
-                  }}
-                  placeholder="What will students learn from this project?"
-                />
-              </div>
+                {/* Estimated Duration */}
+                <div className="space-y-2">
+                  <Label htmlFor="estimatedDuration">Estimated Duration</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="estimatedDuration"
+                      name="estimatedDuration"
+                      type="number"
+                      min="1"
+                      placeholder="Duration"
+                      value={projectData.estimatedDuration}
+                      onChange={handleInputChange}
+                      className="w-32"
+                    />
+                    <Select
+                      value={projectData.durationUnit}
+                      onValueChange={(value) => {
+                        setProjectData(prev => ({ ...prev, durationUnit: value as typeof prev.durationUnit }));
+                        setIsFormDirty(true);
+                      }}
+                    >
+                      <SelectTrigger className="w-[120px]">
+                        <SelectValue placeholder="Unit" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="minutes">Minutes</SelectItem>
+                        <SelectItem value="hours">Hours</SelectItem>
+                        <SelectItem value="days">Days</SelectItem>
+                        <SelectItem value="weeks">Weeks</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
 
-              {/* Prerequisites */}
-              <div className="space-y-2">
-                <Label htmlFor="prerequisites">Prerequisites</Label>
-                <RichTextEditor
-                  value={projectData.prerequisites}
-                  onChange={(value) => {
-                    setProjectData(prev => ({ ...prev, prerequisites: value }));
-                    setIsFormDirty(true);
-                  }}
-                  placeholder="What should students know before starting?"
-                />
+                {/* Learning Objectives */}
+                <div className="space-y-2">
+                  <Label htmlFor="learningObjectives">Learning Objectives</Label>
+                  <RichTextEditor
+                    value={projectData.learningObjectives}
+                    onChange={(value) => {
+                      setProjectData(prev => ({ ...prev, learningObjectives: value }));
+                      setIsFormDirty(true);
+                    }}
+                    placeholder="What will students learn from this project?"
+                  />
+                </div>
+
+                {/* Prerequisites */}
+                <div className="space-y-2">
+                  <Label htmlFor="prerequisites">Prerequisites</Label>
+                  <RichTextEditor
+                    value={projectData.prerequisites}
+                    onChange={(value) => {
+                      setProjectData(prev => ({ ...prev, prerequisites: value }));
+                      setIsFormDirty(true);
+                    }}
+                    placeholder="What should students know before starting?"
+                  />
+                </div>
               </div>
 
               <Button 
@@ -1126,101 +1213,66 @@ export default function CreateProjectPage() {
         onOpenChange={setShowConfirmDialog}
         onConfirm={handleConfirmedSubmit}
         title="Create Project"
-        description="Are you sure you want to create this project? This action cannot be undone."
+        description={
+          <div className="space-y-2">
+            <p>Are you sure you want to create this project?</p>
+            <div className="rounded-md bg-muted p-3">
+              <h4 className="font-medium">Project Summary:</h4>
+              <ul className="list-disc pl-4 space-y-1 text-sm">
+                <li>Title: {projectData.title}</li>
+                <li>Subject: {projectData.subject}</li>
+                <li>Difficulty: {projectData.difficulty}</li>
+                <li>Duration: {projectData.estimatedDuration} {projectData.durationUnit}</li>
+                <li>Lessons: {projectData.lessons.length}</li>
+                <li>Files to upload: {[
+                  projectData.featuredImage,
+                  ...projectData.materials,
+                  ...projectData.resources,
+                  ...projectData.lessons.flatMap(l => [l.imageFile, ...l.resources])
+                ].filter(Boolean).length}</li>
+              </ul>
+            </div>
+            <p className="text-sm text-muted-foreground">This action cannot be undone.</p>
+          </div>
+        }
         confirmText="Create Project"
       />
 
-      {/* Custom Template Dialog */}
-      <Dialog open={customTemplateDialogOpen} onOpenChange={setCustomTemplateDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create Custom Template</DialogTitle>
-            <DialogDescription>
-              Create a reusable lesson template
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Template Name</Label>
-              <Input
-                value={customTemplate.name}
-                onChange={(e) => setCustomTemplate(prev => ({
-                  ...prev,
-                  name: e.target.value
-                }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Category</Label>
-              <Select
-                value={customTemplate.category}
-                onValueChange={(value: LessonTemplate['category']) => 
-                  setCustomTemplate(prev => ({
-                    ...prev,
-                    category: value
-                  }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="research">Research</SelectItem>
-                  <SelectItem value="experiment">Experiment</SelectItem>
-                  <SelectItem value="presentation">Presentation</SelectItem>
-                  <SelectItem value="discussion">Discussion</SelectItem>
-                  <SelectItem value="project">Project</SelectItem>
-                  <SelectItem value="assessment">Assessment</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Description</Label>
-              <Textarea
-                value={customTemplate.description}
-                onChange={(e) => setCustomTemplate(prev => ({
-                  ...prev,
-                  description: e.target.value
-                }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Template Content</Label>
-              <Textarea
-                value={customTemplate.template.description}
-                onChange={(e) => setCustomTemplate(prev => ({
-                  ...prev,
-                  template: {
-                    ...prev.template,
-                    description: e.target.value
-                  }
-                }))}
-                className="min-h-[200px]"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              onClick={() => {
-                const newTemplate = createCustomTemplate(
-                  customTemplate.name,
-                  customTemplate.category,
-                  customTemplate.description,
-                  customTemplate.template
-                );
-                lessonTemplates.push(newTemplate);
-                setCustomTemplateDialogOpen(false);
-                toast({
-                  title: "Template created",
-                  description: "Your custom template has been added",
-                });
-              }}
-            >
-              Create Template
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Section Navigation */}
+      <nav className="fixed right-4 top-1/2 -translate-y-1/2 space-y-2 bg-white/80 backdrop-blur-sm p-2 rounded-lg shadow-lg">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start text-sm"
+          onClick={() => document.getElementById('basic-info')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        >
+          Basic Info
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start text-sm"
+          onClick={() => document.getElementById('media')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        >
+          Media
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start text-sm"
+          onClick={() => document.getElementById('lessons')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        >
+          Lessons
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start text-sm"
+          onClick={() => document.getElementById('settings')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        >
+          Settings
+        </Button>
+      </nav>
     </div>
   );
 }

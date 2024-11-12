@@ -37,87 +37,134 @@ export interface Database {
       }
       projects: {
         Row: {
-          id: string
-          title: string
-          created_at: string
-          subject: 'math' | 'science' | 'history' | 'geography' | 'reading' | 'art'
-          description: string
-          created_by: string
-          estimated_duration: string
-          learning_outcomes: string
-          prerequisites: string
-          updated_at: string
-          status: 'active' | 'completed' | 'archived';
-          progress: number;
+          id: string;
+          title: string;
+          summary: string;
+          featured_image: string | null;
+          intro_video_url: string | null;
+          subject: 'math' | 'science' | 'history' | 'geography' | 'reading' | 'art';
+          difficulty: 'beginner' | 'intermediate' | 'advanced';
+          estimated_duration: number;
+          duration_unit: 'minutes' | 'hours' | 'days' | 'weeks';
+          learning_objectives: string;
+          prerequisites: string | null;
+          created_by: string;
+          created_at: string;
+          updated_at: string;
+          status: 'draft' | 'published' | 'archived';
         }
         Insert: {
-          id?: string
-          title: string
-          created_at?: string
-          subject: 'math' | 'science' | 'history' | 'geography' | 'reading' | 'art'
-          description: string
-          created_by: string
-          estimated_duration: string
-          learning_outcomes: string
-          prerequisites?: string
-          updated_at?: string
-          status?: 'active' | 'completed' | 'archived';
-          progress?: number;
+          id?: string;
+          title: string;
+          summary: string;
+          featured_image?: string | null;
+          intro_video_url?: string | null;
+          subject: 'math' | 'science' | 'history' | 'geography' | 'reading' | 'art';
+          difficulty: 'beginner' | 'intermediate' | 'advanced';
+          estimated_duration: number;
+          duration_unit: 'minutes' | 'hours' | 'days' | 'weeks';
+          learning_objectives: string;
+          prerequisites?: string | null;
+          created_by: string;
+          created_at?: string;
+          updated_at?: string;
+          status?: 'draft' | 'published' | 'archived';
         }
         Update: {
-          id?: string
-          title?: string
-          created_at?: string
-          subject?: 'math' | 'science' | 'history' | 'geography' | 'reading' | 'art'
-          description?: string
-          created_by?: string
-          estimated_duration?: string
-          learning_outcomes?: string
-          prerequisites?: string
-          updated_at?: string
-          status?: 'active' | 'completed' | 'archived';
-          progress?: number;
+          id?: string;
+          title?: string;
+          summary?: string;
+          featured_image?: string | null;
+          intro_video_url?: string | null;
+          subject?: 'math' | 'science' | 'history' | 'geography' | 'reading' | 'art';
+          difficulty?: 'beginner' | 'intermediate' | 'advanced';
+          estimated_duration?: number;
+          duration_unit?: 'minutes' | 'hours' | 'days' | 'weeks';
+          learning_objectives?: string;
+          prerequisites?: string | null;
+          created_by?: string;
+          created_at?: string;
+          updated_at?: string;
+          status?: 'draft' | 'published' | 'archived';
         }
       }
       project_steps: {
         Row: {
-          id: string
-          project_id: string
-          title: string
-          description: string
-          order: number
-          estimated_time: string
-          video_url: string | null
-          created_at: string
-          updated_at: string
-          resources: string | null
-          featured_image: string | null
+          id: string;
+          project_id: string;
+          title: string;
+          summary: string;
+          description: string;
+          video_url: string | null;
+          featured_image: string | null;
+          documentation: string | null;
+          estimated_duration: number;
+          duration_unit: 'minutes' | 'hours';
+          order_index: number;
+          created_at: string;
+          updated_at: string;
         }
         Insert: {
-          id?: string
-          project_id: string
-          title: string
-          description: string
-          order: number
-          estimated_time: string
-          video_url?: string | null
-          created_at?: string
-          updated_at?: string
-          resources?: string | null
-          featured_image?: string | null
+          id?: string;
+          project_id: string;
+          title: string;
+          summary: string;
+          description: string;
+          video_url?: string | null;
+          featured_image?: string | null;
+          documentation?: string | null;
+          estimated_duration: number;
+          duration_unit: 'minutes' | 'hours';
+          order_index: number;
+          created_at?: string;
+          updated_at?: string;
         }
         Update: {
-          id?: string
-          project_id?: string
-          title?: string
-          description?: string
-          order?: number
-          estimated_time?: string
-          video_url?: string | null
-          created_at?: string
-          updated_at?: string
-          resources?: string | null
-          featured_image?: string | null
+          id?: string;
+          project_id?: string;
+          title?: string;
+          summary?: string;
+          description?: string;
+          video_url?: string | null;
+          featured_image?: string | null;
+          documentation?: string | null;
+          estimated_duration?: number;
+          duration_unit?: 'minutes' | 'hours';
+          order_index?: number;
+          created_at?: string;
+          updated_at?: string;
+        }
+      }
+      project_resources: {
+        Row: {
+          id: string;
+          project_id: string;
+          step_id: string | null;
+          file_path: string;
+          file_name: string;
+          file_type: string;
+          resource_type: 'material' | 'resource' | 'step_resource';
+          created_at: string;
+        }
+        Insert: {
+          id?: string;
+          project_id: string;
+          step_id?: string | null;
+          file_path: string;
+          file_name: string;
+          file_type: string;
+          resource_type: 'material' | 'resource' | 'step_resource';
+          created_at?: string;
+        }
+        Update: {
+          id?: string;
+          project_id?: string;
+          step_id?: string | null;
+          file_path?: string;
+          file_name?: string;
+          file_type?: string;
+          resource_type?: 'material' | 'resource' | 'step_resource';
+          created_at?: string;
         }
       }
       step_resources: {
