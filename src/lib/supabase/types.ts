@@ -246,6 +246,192 @@ export type Database = {
           created_at?: string
         }
       }
+      project_status_history: {
+        Row: {
+          id: string;
+          project_id: string;
+          old_status: string;
+          new_status: string;
+          changed_by: string;
+          reason: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          old_status: string;
+          new_status: string;
+          changed_by: string;
+          reason?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          old_status?: string;
+          new_status?: string;
+          changed_by?: string;
+          reason?: string | null;
+          created_at?: string;
+        };
+      };
+      project_versions: {
+        Row: {
+          id: string;
+          project_id: string;
+          version_number: number;
+          changes: string;
+          created_by: string;
+          created_at: string;
+          is_major_version: boolean;
+          metadata: Json;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          version_number: number;
+          changes: string;
+          created_by: string;
+          created_at?: string;
+          is_major_version?: boolean;
+          metadata?: Json;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          version_number?: number;
+          changes?: string;
+          created_by?: string;
+          created_at?: string;
+          is_major_version?: boolean;
+          metadata?: Json;
+        };
+      };
+      project_snapshots: {
+        Row: {
+          id: string;
+          version_id: string;
+          project_data: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          version_id: string;
+          project_data: Json;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          version_id?: string;
+          project_data?: Json;
+          created_at?: string;
+        };
+      };
+      draft_conflicts: {
+        Row: {
+          id: string;
+          project_id: string;
+          user_id: string;
+          draft_data: Json;
+          resolved: boolean;
+          resolved_by: string | null;
+          resolved_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          user_id: string;
+          draft_data: Json;
+          resolved?: boolean;
+          resolved_by?: string | null;
+          resolved_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          user_id?: string;
+          draft_data?: Json;
+          resolved?: boolean;
+          resolved_by?: string | null;
+          resolved_at?: string | null;
+          created_at?: string;
+        };
+      };
+      status_notifications: {
+        Row: {
+          id: string;
+          user_id: string;
+          title: string;
+          message: string;
+          read: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          title: string;
+          message: string;
+          read?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          title?: string;
+          message?: string;
+          read?: boolean;
+          created_at?: string;
+        };
+      };
+      status_change_approvals: {
+        Row: {
+          id: string
+          project_id: string
+          requested_by: string
+          requested_status: string
+          current_status: string
+          reason: string | null
+          approved_by: string | null
+          approved_at: string | null
+          rejected_by: string | null
+          rejected_at: string | null
+          rejection_reason: string | null
+          created_at: string
+          status: 'pending' | 'approved' | 'rejected'
+        }
+        Insert: {
+          id?: string
+          project_id: string
+          requested_by: string
+          requested_status: string
+          current_status: string
+          reason?: string | null
+          approved_by?: string | null
+          approved_at?: string | null
+          rejected_by?: string | null
+          rejected_at?: string | null
+          rejection_reason?: string | null
+          created_at?: string
+          status?: 'pending' | 'approved' | 'rejected'
+        }
+        Update: {
+          id?: string
+          project_id?: string
+          requested_by?: string
+          requested_status?: string
+          current_status?: string
+          reason?: string | null
+          approved_by?: string | null
+          approved_at?: string | null
+          rejected_by?: string | null
+          rejected_at?: string | null
+          rejection_reason?: string | null
+          created_at?: string
+          status?: 'pending' | 'approved' | 'rejected'
+        }
+      }
     }
     Views: {
       [_ in never]: never
