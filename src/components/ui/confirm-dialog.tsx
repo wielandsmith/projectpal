@@ -1,11 +1,20 @@
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "./alert-dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface ConfirmDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
   title: string;
-  description: string;
+  description: React.ReactNode;
   confirmText?: string;
   cancelText?: string;
 }
@@ -24,11 +33,15 @@ export function ConfirmDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
+          <AlertDialogDescription>
+            {description}
+          </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{cancelText}</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm}>{confirmText}</AlertDialogAction>
+          <AlertDialogAction onClick={onConfirm}>
+            {confirmText}
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

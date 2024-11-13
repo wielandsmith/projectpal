@@ -336,32 +336,44 @@ export default function CreateProjectPage() {
     setShowConfirmDialog(false);
     
     try {
-      // Upload files first
+      // Organize files by bucket
       const files = [
-        { file: projectData.featuredImage, path: `featured/${Date.now()}-${projectData.featuredImage?.name}` },
+        // Featured image goes to project-images bucket
+        projectData.featuredImage && {
+          file: projectData.featuredImage,
+          path: `project-images/${Date.now()}-${projectData.featuredImage.name}`,
+          bucket: 'project-images'
+        },
+        // Materials and resources go to project-resources bucket
         ...projectData.materials.map(file => ({
           file,
-          path: `materials/${Date.now()}-${file.name}`
+          path: `project-resources/materials/${Date.now()}-${file.name}`,
+          bucket: 'project-resources'
         })),
         ...projectData.resources.map(file => ({
           file,
-          path: `resources/${Date.now()}-${file.name}`
+          path: `project-resources/resources/${Date.now()}-${file.name}`,
+          bucket: 'project-resources'
         })),
+        // Lesson images go to project-images bucket
         ...projectData.lessons.flatMap(lesson => [
           lesson.imageFile && {
             file: lesson.imageFile,
-            path: `lessons/${Date.now()}-${lesson.imageFile.name}`
+            path: `project-images/lessons/${lesson.id}/${Date.now()}-${lesson.imageFile.name}`,
+            bucket: 'project-images'
           },
+          // Lesson resources go to project-resources bucket
           ...lesson.resources.map(file => ({
             file,
-            path: `lessons/resources/${Date.now()}-${file.name}`
+            path: `project-resources/lessons/${lesson.id}/${Date.now()}-${file.name}`,
+            bucket: 'project-resources'
           }))
-        ]).filter(Boolean)
-      ].filter((item): item is { file: File; path: string } => item?.file != null);
+        ])
+      ].filter((item): item is { file: File; path: string; bucket: string } => item?.file != null);
 
-      // Upload all files
-      for (const { file, path } of files) {
-        await fileUploader.addToQueue(file, path);
+      // Upload all files to their respective buckets
+      for (const { file, path, bucket } of files) {
+        await fileUploader.addToQueue(file, path, 'medium', bucket);
       }
 
       // Create project in database

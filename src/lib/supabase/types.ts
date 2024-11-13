@@ -6,7 +6,7 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
-export interface Database {
+export type Database = {
   public: {
     Tables: {
       profiles: {
@@ -37,238 +37,213 @@ export interface Database {
       }
       projects: {
         Row: {
-          id: string;
-          title: string;
-          summary: string;
-          featured_image: string | null;
-          intro_video_url: string | null;
-          subject: 'math' | 'science' | 'history' | 'geography' | 'reading' | 'art';
-          difficulty: 'beginner' | 'intermediate' | 'advanced';
-          estimated_duration: number;
-          duration_unit: 'minutes' | 'hours' | 'days' | 'weeks';
-          learning_objectives: string;
-          prerequisites: string | null;
-          created_by: string;
-          created_at: string;
-          updated_at: string;
-          status: 'draft' | 'published' | 'archived';
+          id: string
+          title: string
+          summary: string
+          featured_image: string | null
+          intro_video_url: string | null
+          subject: 'math' | 'science' | 'history' | 'geography' | 'reading' | 'art'
+          difficulty: 'beginner' | 'intermediate' | 'advanced'
+          estimated_duration: number
+          duration_unit: 'minutes' | 'hours' | 'days' | 'weeks'
+          learning_objectives: string
+          prerequisites: string | null
+          created_by: string
+          created_at: string
+          updated_at: string
+          status: 'draft' | 'published' | 'archived'
         }
         Insert: {
-          id?: string;
-          title: string;
-          summary: string;
-          featured_image?: string | null;
-          intro_video_url?: string | null;
-          subject: 'math' | 'science' | 'history' | 'geography' | 'reading' | 'art';
-          difficulty: 'beginner' | 'intermediate' | 'advanced';
-          estimated_duration: number;
-          duration_unit: 'minutes' | 'hours' | 'days' | 'weeks';
-          learning_objectives: string;
-          prerequisites?: string | null;
-          created_by: string;
-          created_at?: string;
-          updated_at?: string;
-          status?: 'draft' | 'published' | 'archived';
+          id?: string
+          title: string
+          summary: string
+          featured_image?: string | null
+          intro_video_url?: string | null
+          subject: 'math' | 'science' | 'history' | 'geography' | 'reading' | 'art'
+          difficulty: 'beginner' | 'intermediate' | 'advanced'
+          estimated_duration: number
+          duration_unit: 'minutes' | 'hours' | 'days' | 'weeks'
+          learning_objectives: string
+          prerequisites?: string | null
+          created_by: string
+          created_at?: string
+          updated_at?: string
+          status?: 'draft' | 'published' | 'archived'
         }
         Update: {
-          id?: string;
-          title?: string;
-          summary?: string;
-          featured_image?: string | null;
-          intro_video_url?: string | null;
-          subject?: 'math' | 'science' | 'history' | 'geography' | 'reading' | 'art';
-          difficulty?: 'beginner' | 'intermediate' | 'advanced';
-          estimated_duration?: number;
-          duration_unit?: 'minutes' | 'hours' | 'days' | 'weeks';
-          learning_objectives?: string;
-          prerequisites?: string | null;
-          created_by?: string;
-          created_at?: string;
-          updated_at?: string;
-          status?: 'draft' | 'published' | 'archived';
+          id?: string
+          title?: string
+          summary?: string
+          featured_image?: string | null
+          intro_video_url?: string | null
+          subject?: 'math' | 'science' | 'history' | 'geography' | 'reading' | 'art'
+          difficulty?: 'beginner' | 'intermediate' | 'advanced'
+          estimated_duration?: number
+          duration_unit?: 'minutes' | 'hours' | 'days' | 'weeks'
+          learning_objectives?: string
+          prerequisites?: string | null
+          created_by?: string
+          created_at?: string
+          updated_at?: string
+          status?: 'draft' | 'published' | 'archived'
         }
       }
       project_steps: {
         Row: {
-          id: string;
-          project_id: string;
-          title: string;
-          summary: string;
-          description: string;
-          video_url: string | null;
-          featured_image: string | null;
-          documentation: string | null;
-          estimated_duration: number;
-          duration_unit: 'minutes' | 'hours';
-          order_index: number;
-          created_at: string;
-          updated_at: string;
+          id: string
+          project_id: string
+          title: string
+          summary: string
+          description: string
+          video_url: string | null
+          featured_image: string | null
+          documentation: string | null
+          estimated_duration: number
+          duration_unit: 'minutes' | 'hours'
+          order_index: number
+          created_at: string
+          updated_at: string
         }
         Insert: {
-          id?: string;
-          project_id: string;
-          title: string;
-          summary: string;
-          description: string;
-          video_url?: string | null;
-          featured_image?: string | null;
-          documentation?: string | null;
-          estimated_duration: number;
-          duration_unit: 'minutes' | 'hours';
-          order_index: number;
-          created_at?: string;
-          updated_at?: string;
+          id?: string
+          project_id: string
+          title: string
+          summary: string
+          description: string
+          video_url?: string | null
+          featured_image?: string | null
+          documentation?: string | null
+          estimated_duration: number
+          duration_unit: 'minutes' | 'hours'
+          order_index: number
+          created_at?: string
+          updated_at?: string
         }
         Update: {
-          id?: string;
-          project_id?: string;
-          title?: string;
-          summary?: string;
-          description?: string;
-          video_url?: string | null;
-          featured_image?: string | null;
-          documentation?: string | null;
-          estimated_duration?: number;
-          duration_unit?: 'minutes' | 'hours';
-          order_index?: number;
-          created_at?: string;
-          updated_at?: string;
+          id?: string
+          project_id?: string
+          title?: string
+          summary?: string
+          description?: string
+          video_url?: string | null
+          featured_image?: string | null
+          documentation?: string | null
+          estimated_duration?: number
+          duration_unit?: 'minutes' | 'hours'
+          order_index?: number
+          created_at?: string
+          updated_at?: string
         }
       }
       project_resources: {
         Row: {
-          id: string;
-          project_id: string;
-          step_id: string | null;
-          file_path: string;
-          file_name: string;
-          file_type: string;
-          resource_type: 'material' | 'resource' | 'step_resource';
-          created_at: string;
-        }
-        Insert: {
-          id?: string;
-          project_id: string;
-          step_id?: string | null;
-          file_path: string;
-          file_name: string;
-          file_type: string;
-          resource_type: 'material' | 'resource' | 'step_resource';
-          created_at?: string;
-        }
-        Update: {
-          id?: string;
-          project_id?: string;
-          step_id?: string | null;
-          file_path?: string;
-          file_name?: string;
-          file_type?: string;
-          resource_type?: 'material' | 'resource' | 'step_resource';
-          created_at?: string;
-        }
-      }
-      step_resources: {
-        Row: {
           id: string
-          step_id: string
-          title: string
-          created_at: string
-          type: 'pdf' | 'image' | 'video' | 'link'
-          url: string
-          description: string
-        }
-        Insert: {
-          id?: string
-          step_id: string
-          title: string
-          created_at?: string
-          type: 'pdf' | 'image' | 'video' | 'link'
-          url: string
-          description: string
-        }
-        Update: {
-          id?: string
-          step_id?: string
-          title?: string
-          created_at?: string
-          type?: 'pdf' | 'image' | 'video' | 'link'
-          url?: string
-          description?: string
-        }
-      }
-      children: {
-        Row: {
-          id: string
-          parent_id: string
-          child_id: string
+          project_id: string
+          step_id: string | null
+          file_path: string
+          file_name: string
+          file_type: string
+          resource_type: 'material' | 'resource' | 'step_resource'
           created_at: string
         }
         Insert: {
           id?: string
-          parent_id: string
-          child_id: string
+          project_id: string
+          step_id?: string | null
+          file_path: string
+          file_name: string
+          file_type: string
+          resource_type: 'material' | 'resource' | 'step_resource'
           created_at?: string
         }
         Update: {
           id?: string
-          parent_id?: string
-          child_id?: string
+          project_id?: string
+          step_id?: string | null
+          file_path?: string
+          file_name?: string
+          file_type?: string
+          resource_type?: 'material' | 'resource' | 'step_resource'
           created_at?: string
         }
       }
-      events: {
+      content_moderation: {
         Row: {
-          id: string;
-          title: string;
-          date: string;
-          student_id: string;
-          description: string;
-          created_at: string;
+          id: string
+          project_id: string
+          content_type: string
+          content_id: string
+          status: 'pending' | 'approved' | 'rejected' | 'flagged'
+          moderator_id: string | null
+          moderated_at: string | null
+          flags: string[] | null
+          reason: string | null
+          created_at: string
         }
         Insert: {
-          id: string;
-          title: string;
-          date: string;
-          student_id: string;
-          description: string;
-          created_at: string;
+          id?: string
+          project_id: string
+          content_type: string
+          content_id: string
+          status?: 'pending' | 'approved' | 'rejected' | 'flagged'
+          moderator_id?: string | null
+          moderated_at?: string | null
+          flags?: string[] | null
+          reason?: string | null
+          created_at?: string
         }
         Update: {
-          id: string;
-          title: string;
-          date: string;
-          student_id: string;
-          description: string;
-          created_at: string;
+          id?: string
+          project_id?: string
+          content_type?: string
+          content_id?: string
+          status?: 'pending' | 'approved' | 'rejected' | 'flagged'
+          moderator_id?: string | null
+          moderated_at?: string | null
+          flags?: string[] | null
+          reason?: string | null
+          created_at?: string
         }
       }
-      messages: {
+      ai_content_suggestions: {
         Row: {
-          id: string;
-          sender_id: string;
-          recipient_id: string;
-          subject: string;
-          content: string;
-          read: boolean;
-          created_at: string;
+          id: string
+          content_type: string
+          content_id: string
+          original_content: string
+          suggested_content: string
+          suggestion_type: string
+          confidence_score: number | null
+          applied: boolean
+          applied_at: string | null
+          applied_by: string | null
+          created_at: string
         }
         Insert: {
-          id: string;
-          sender_id: string;
-          recipient_id: string;
-          subject: string;
-          content: string;
-          read: boolean;
-          created_at: string;
+          id?: string
+          content_type: string
+          content_id: string
+          original_content: string
+          suggested_content: string
+          suggestion_type: string
+          confidence_score?: number | null
+          applied?: boolean
+          applied_at?: string | null
+          applied_by?: string | null
+          created_at?: string
         }
         Update: {
-          id: string;
-          sender_id: string;
-          recipient_id: string;
-          subject: string;
-          content: string;
-          read: boolean;
-          created_at: string;
+          id?: string
+          content_type?: string
+          content_id?: string
+          original_content?: string
+          suggested_content?: string
+          suggestion_type?: string
+          confidence_score?: number | null
+          applied?: boolean
+          applied_at?: string | null
+          applied_by?: string | null
+          created_at?: string
         }
       }
     }
@@ -279,7 +254,9 @@ export interface Database {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      user_role: 'student' | 'parent' | 'teacher'
+      content_type: 'project' | 'step' | 'resource' | 'comment'
+      resource_type: 'material' | 'resource' | 'step_resource'
     }
   }
 } 

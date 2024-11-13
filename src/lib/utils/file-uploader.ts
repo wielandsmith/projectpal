@@ -1,380 +1,232 @@
 import { supabase } from '@/lib/supabase/client';
 
-export type UploadOptions = {
-  maxRetries?: number;
-  initialRetryDelay?: number;
-  maxRetryDelay?: number;
-  onProgress?: (progress: number) => void;
-  onDetailedProgress?: (details: UploadProgressDetails) => void;
-  batchSize?: number;
-  maxBandwidth?: number; // bytes per second
-  priorityWeights?: Record<UploadPriority, number>;
-};
+export type UploadPriority = 'high' | 'medium' | 'low';
+export type UploadStatus = 'pending' | 'uploading' | 'paused' | 'completed' | 'error';
 
-export type UploadProgressDetails = {
-  totalFiles: number;
-  uploadedFiles: number;
+export interface UploadProgressDetails {
   currentFileName: string;
   currentFileProgress: number;
   overallProgress: number;
-  status: 'uploading' | 'paused' | 'cancelled' | 'completed' | 'error';
-  speed?: number; // bytes per second
-  estimatedTimeRemaining?: number; // seconds
-};
+  uploadedFiles: number;
+  totalFiles: number;
+  status: UploadStatus;
+  speed?: number;
+  estimatedTimeRemaining?: number;
+}
 
-export type UploadPriority = 'high' | 'medium' | 'low';
+export interface UploadError {
+  code: string;
+  message: string;
+  fileName: string;
+  retryCount: number;
+  timestamp: number;
+}
 
-export type QueueItem = {
+interface QueueItem {
   file: File;
   path: string;
   priority: UploadPriority;
-  addedAt: number;
-};
-
-export type UploadError = {
-  code: string;
-  message: string;
-  details?: any;
+  bucket: string;
   retryCount: number;
-  timestamp: number;
-};
+  controller: AbortController;
+}
 
-type UploadState = {
-  queue: Array<{ file: File; path: string }>;
-  uploadedSize: number;
-  totalSize: number;
-  startTime: number;
-  lastUpdateTime: number;
-  lastUploadedSize: number;
-  uploadedFiles: number;
-  currentFileName: string;
-  currentFileProgress: number;
-};
+interface FileUploaderOptions {
+  maxRetries?: number;
+  initialRetryDelay?: number;
+  maxRetryDelay?: number;
+  batchSize?: number;
+  onProgress?: (progress: number) => void;
+  onDetailedProgress?: (details: UploadProgressDetails) => void;
+  maxBandwidth?: number;
+  priorityWeights?: {
+    high: number;
+    medium: number;
+    low: number;
+  };
+}
 
 export class FileUploader {
   private queue: QueueItem[] = [];
-  private uploading = false;
-  private paused = false;
-  private cancelled = false;
-  private options: Required<UploadOptions>;
-  private currentUpload: AbortController | null = null;
-  private uploadState: UploadState = {
-    queue: [],
-    uploadedSize: 0,
-    totalSize: 0,
-    startTime: Date.now(),
-    lastUpdateTime: Date.now(),
-    lastUploadedSize: 0,
-    uploadedFiles: 0,
-    currentFileName: '',
-    currentFileProgress: 0,
-  };
-  private bandwidthThrottle: number = 0;
-  private errors: Record<string, UploadError[]> = {};
-  private readonly priorityWeights: Record<UploadPriority, number>;
+  private activeUploads = 0;
+  private isPaused = false;
+  private errors: UploadError[] = [];
+  private uploadStartTime: number | null = null;
+  private bytesUploaded = 0;
+  private totalBytes = 0;
+  private bandwidthLimit: number;
 
-  constructor(options: UploadOptions = {}) {
-    this.options = {
-      maxRetries: 3,
-      initialRetryDelay: 1000,
-      maxRetryDelay: 30000,
-      batchSize: 3,
-      onProgress: () => {},
-      onDetailedProgress: () => {},
-      maxBandwidth: Infinity,
-      priorityWeights: {
-        high: 3,
-        medium: 2,
-        low: 1,
-      },
-      ...options,
-    };
-    this.priorityWeights = this.options.priorityWeights;
-  }
+  private readonly maxRetries: number;
+  private readonly initialRetryDelay: number;
+  private readonly maxRetryDelay: number;
+  private readonly batchSize: number;
+  private readonly onProgress?: (progress: number) => void;
+  private readonly onDetailedProgress?: (details: UploadProgressDetails) => void;
+  private readonly priorityWeights: { [K in UploadPriority]: number };
 
-  private throttle(chunk: ArrayBuffer): Promise<void> {
-    if (!this.options.maxBandwidth || this.options.maxBandwidth === Infinity) {
-      return Promise.resolve();
-    }
-
-    const chunkSize = chunk.byteLength;
-    const delay = (chunkSize / this.options.maxBandwidth) * 1000;
-    return new Promise(resolve => setTimeout(resolve, delay));
-  }
-
-  private async uploadChunk(chunk: ArrayBuffer, controller: AbortController): Promise<void> {
-    await this.throttle(chunk);
-    // Implement chunk upload logic here
-  }
-
-  private sortQueue(): void {
-    this.queue.sort((a, b) => {
-      const priorityDiff = this.priorityWeights[b.priority] - this.priorityWeights[a.priority];
-      if (priorityDiff !== 0) return priorityDiff;
-      return a.addedAt - b.addedAt; // FIFO within same priority
-    });
-  }
-
-  private logError(fileId: string, error: UploadError): void {
-    if (!this.errors[fileId]) {
-      this.errors[fileId] = [];
-    }
-    this.errors[fileId].push(error);
-    this.saveState(); // Save errors with state
-  }
-
-  private getDetailedError(error: any): UploadError {
-    return {
-      code: error.code || 'UNKNOWN_ERROR',
-      message: error.message || 'An unknown error occurred',
-      details: error.details || error,
-      retryCount: 0,
-      timestamp: Date.now(),
+  constructor(options: FileUploaderOptions = {}) {
+    this.maxRetries = options.maxRetries ?? 3;
+    this.initialRetryDelay = options.initialRetryDelay ?? 1000;
+    this.maxRetryDelay = options.maxRetryDelay ?? 30000;
+    this.batchSize = options.batchSize ?? 3;
+    this.onProgress = options.onProgress;
+    this.onDetailedProgress = options.onDetailedProgress;
+    this.bandwidthLimit = options.maxBandwidth ?? Infinity;
+    this.priorityWeights = options.priorityWeights ?? {
+      high: 3,
+      medium: 2,
+      low: 1
     };
   }
 
-  private saveState() {
-    const state = {
-      ...this.uploadState,
-      queue: this.uploadState.queue,
-      errors: this.errors,
-      progress: {
-        totalFiles: this.queue.length,
-        uploadedFiles: this.uploadState.uploadedFiles,
-        currentFileName: this.uploadState.currentFileName,
-        currentFileProgress: this.uploadState.currentFileProgress,
-        overallProgress: (this.uploadState.uploadedSize / this.uploadState.totalSize) * 100,
-      },
-    };
-    localStorage.setItem('uploadState', JSON.stringify(state));
-  }
-
-  private loadState(): boolean {
-    const savedState = localStorage.getItem('uploadState');
-    if (!savedState) return false;
-
-    try {
-      const state = JSON.parse(savedState);
-      this.uploadState = {
-        ...state,
-        startTime: Date.now(),
-        lastUpdateTime: Date.now(),
-        lastUploadedSize: state.uploadedSize,
-      };
-      this.errors = state.errors || {};
-      return true;
-    } catch (error) {
-      console.error('Failed to load upload state:', error);
-      return false;
-    }
-  }
-
-  getErrors(fileId?: string): UploadError[] {
-    if (fileId) {
-      return this.errors[fileId] || [];
-    }
-    return Object.values(this.errors).flat();
-  }
-
-  clearErrors(fileId?: string): void {
-    if (fileId) {
-      delete this.errors[fileId];
-    } else {
-      this.errors = {};
-    }
-    this.saveState();
-  }
-
-  setBandwidthLimit(bytesPerSecond: number): void {
-    this.options.maxBandwidth = bytesPerSecond;
-  }
-
-  setPriority(fileId: string, priority: UploadPriority): void {
-    const item = this.queue.find(i => i.file.name === fileId);
-    if (item) {
-      item.priority = priority;
-      this.sortQueue();
-      this.saveState();
-    }
-  }
-
-  async uploadWithRetry(file: File, path: string, attempt = 1): Promise<string> {
-    if (this.paused || this.cancelled) {
-      throw new Error(this.paused ? 'Upload paused' : 'Upload cancelled');
-    }
-
-    try {
-      const controller = new AbortController();
-      this.currentUpload = controller;
-
-      const { data, error } = await supabase.storage
-        .from('projects')
-        .upload(path, file, {
-          cacheControl: '3600',
-          upsert: false,
-          abortSignal: controller.signal,
-        });
-
-      if (error) throw error;
-      
-      this.uploadState.uploadedSize += file.size;
-      this.saveState();
-      
-      return data.path;
-    } catch (error: any) {
-      if (error.message === 'Upload paused' || error.message === 'Upload cancelled') {
-        throw error;
-      }
-      
-      if (attempt < this.options.maxRetries) {
-        const delay = this.calculateRetryDelay(attempt);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return this.uploadWithRetry(file, path, attempt + 1);
-      }
-      throw error;
-    } finally {
-      this.currentUpload = null;
-    }
-  }
-
-  async addToQueue(file: File, path: string, priority: UploadPriority = 'medium'): Promise<void> {
-    const queueItem: QueueItem = {
+  async addToQueue(
+    file: File, 
+    path: string, 
+    priority: UploadPriority = 'medium',
+    bucket: string = 'project-resources'
+  ): Promise<void> {
+    const controller = new AbortController();
+    this.queue.push({
       file,
       path,
       priority,
-      addedAt: Date.now(),
-    };
-    
-    this.queue.push(queueItem);
-    this.uploadState.queue.push(queueItem);
-    this.uploadState.totalSize += file.size;
-    this.sortQueue();
-    this.saveState();
-
-    if (!this.uploading && !this.paused) {
-      await this.processQueue();
-    }
+      bucket,
+      retryCount: 0,
+      controller
+    });
+    this.totalBytes += file.size;
+    this.processQueue();
   }
 
   private async processQueue(): Promise<void> {
-    if (this.queue.length === 0 || this.paused || this.cancelled) {
-      this.uploading = false;
+    if (this.isPaused || this.activeUploads >= this.batchSize) {
       return;
     }
 
-    this.uploading = true;
-    const batch = this.queue.splice(0, this.options.batchSize);
-    const batchSize = batch.reduce((acc, { file }) => acc + file.size, 0);
+    // Sort queue by priority
+    this.queue.sort((a, b) => 
+      this.priorityWeights[b.priority] - this.priorityWeights[a.priority]
+    );
 
-    try {
-      await Promise.all(
-        batch.map(async ({ file, path }, index) => {
-          const speed = this.calculateSpeed();
-          const estimatedTimeRemaining = this.calculateEstimatedTimeRemaining(speed);
+    while (this.queue.length > 0 && this.activeUploads < this.batchSize) {
+      const item = this.queue.shift();
+      if (!item) break;
 
-          this.options.onDetailedProgress({
-            totalFiles: this.queue.length + batch.length,
-            uploadedFiles: index,
-            currentFileName: file.name,
-            currentFileProgress: 0,
-            overallProgress: (this.uploadState.uploadedSize / this.uploadState.totalSize) * 100,
-            status: 'uploading',
-            speed,
-            estimatedTimeRemaining,
-          });
-
-          const uploadedPath = await this.uploadWithRetry(file, path);
-
-          this.options.onDetailedProgress({
-            totalFiles: this.queue.length + batch.length,
-            uploadedFiles: index + 1,
-            currentFileName: file.name,
-            currentFileProgress: 100,
-            overallProgress: (this.uploadState.uploadedSize / this.uploadState.totalSize) * 100,
-            status: 'uploading',
-            speed,
-            estimatedTimeRemaining,
-          });
-
-          return uploadedPath;
-        })
-      );
-
-      // Clear saved state if batch completes successfully
-      if (this.queue.length === 0) {
-        localStorage.removeItem('uploadState');
+      this.activeUploads++;
+      if (!this.uploadStartTime) {
+        this.uploadStartTime = Date.now();
       }
-    } catch (error) {
-      console.error('Batch upload failed:', error);
-      if (!this.cancelled && !this.paused) {
-        this.queue.unshift(...batch);
-      }
-      this.options.onDetailedProgress({
-        totalFiles: this.queue.length,
-        uploadedFiles: 0,
-        currentFileName: '',
-        currentFileProgress: 0,
-        overallProgress: (this.uploadState.uploadedSize / this.uploadState.totalSize) * 100,
-        status: 'error',
-      });
-    }
 
-    if (!this.cancelled && !this.paused) {
-      await this.processQueue();
+      try {
+        await this.uploadFile(item);
+      } catch (error) {
+        console.error(`Error uploading ${item.file.name}:`, error);
+        if (item.retryCount < this.maxRetries) {
+          const delay = Math.min(
+            this.initialRetryDelay * Math.pow(2, item.retryCount),
+            this.maxRetryDelay
+          );
+          item.retryCount++;
+          setTimeout(() => {
+            this.queue.unshift(item);
+            this.processQueue();
+          }, delay);
+        } else {
+          this.errors.push({
+            code: 'UPLOAD_FAILED',
+            message: error instanceof Error ? error.message : 'Upload failed',
+            fileName: item.file.name,
+            retryCount: item.retryCount,
+            timestamp: Date.now()
+          });
+        }
+      } finally {
+        this.activeUploads--;
+        this.processQueue();
+      }
     }
   }
 
-  resume(): void {
-    this.paused = false;
-    if (this.loadState()) {
-      this.processQueue();
+  private async uploadFile(item: QueueItem): Promise<void> {
+    const { file, path, bucket, controller } = item;
+    const chunkSize = 1024 * 1024; // 1MB chunks
+    let uploadedBytes = 0;
+
+    const { error } = await supabase.storage
+      .from(bucket)
+      .upload(path, file, {
+        cacheControl: '3600',
+        upsert: false,
+        abortSignal: controller.signal,
+      });
+
+    if (error) throw error;
+
+    this.bytesUploaded += file.size;
+    this.updateProgress(file.name, uploadedBytes / file.size * 100);
+  }
+
+  private updateProgress(fileName: string, fileProgress: number): void {
+    const overallProgress = (this.bytesUploaded / this.totalBytes) * 100;
+    const uploadedFiles = this.getUploadedFilesCount();
+    const totalFiles = uploadedFiles + this.queue.length;
+
+    // Calculate speed and estimated time
+    let speed, estimatedTimeRemaining;
+    if (this.uploadStartTime) {
+      const elapsedTime = (Date.now() - this.uploadStartTime) / 1000; // in seconds
+      speed = this.bytesUploaded / elapsedTime; // bytes per second
+      const remainingBytes = this.totalBytes - this.bytesUploaded;
+      estimatedTimeRemaining = remainingBytes / speed;
     }
+
+    const details: UploadProgressDetails = {
+      currentFileName: fileName,
+      currentFileProgress: fileProgress,
+      overallProgress,
+      uploadedFiles,
+      totalFiles,
+      status: this.isPaused ? 'paused' : 'uploading',
+      speed,
+      estimatedTimeRemaining,
+    };
+
+    this.onProgress?.(overallProgress);
+    this.onDetailedProgress?.(details);
+  }
+
+  private getUploadedFilesCount(): number {
+    return Math.floor((this.bytesUploaded / this.totalBytes) * (this.queue.length + this.activeUploads));
   }
 
   pause(): void {
-    this.paused = true;
-    if (this.currentUpload) {
-      this.currentUpload.abort();
-    }
+    this.isPaused = true;
+    this.queue.forEach(item => item.controller.abort());
+  }
+
+  resume(): void {
+    this.isPaused = false;
+    this.processQueue();
   }
 
   cancel(): void {
-    this.cancelled = true;
-    if (this.currentUpload) {
-      this.currentUpload.abort();
-    }
+    this.queue.forEach(item => item.controller.abort());
     this.queue = [];
-    this.updateProgress({
-      totalFiles: 0,
-      uploadedFiles: 0,
-      currentFileName: '',
-      currentFileProgress: 0,
-      overallProgress: 0,
-      status: 'cancelled'
-    });
+    this.activeUploads = 0;
+    this.bytesUploaded = 0;
+    this.totalBytes = 0;
+    this.uploadStartTime = null;
   }
 
-  private updateProgress(details: UploadProgressDetails): void {
-    this.options.onProgress?.(details.overallProgress);
-    this.options.onDetailedProgress?.(details);
+  getErrors(): UploadError[] {
+    return [...this.errors];
   }
 
-  private calculateSpeed(): number {
-    const now = Date.now();
-    const timeDiff = (now - this.uploadState.lastUpdateTime) / 1000;
-    const sizeDiff = this.uploadState.uploadedSize - this.uploadState.lastUploadedSize;
-    return sizeDiff / timeDiff;
+  clearErrors(): void {
+    this.errors = [];
   }
 
-  private calculateEstimatedTimeRemaining(speed: number): number {
-    const remainingSize = this.uploadState.totalSize - this.uploadState.uploadedSize;
-    return speed > 0 ? remainingSize / speed : 0;
-  }
-
-  private calculateRetryDelay(attempt: number): number {
-    return Math.min(
-      this.options.initialRetryDelay * Math.pow(2, attempt - 1),
-      this.options.maxRetryDelay
-    );
+  setBandwidthLimit(bytesPerSecond: number): void {
+    this.bandwidthLimit = bytesPerSecond;
   }
 } 
